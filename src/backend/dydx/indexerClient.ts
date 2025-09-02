@@ -115,6 +115,99 @@ export async function getMarkets(symbols: string[] = ['BTC-USD', 'ETH-USD']): Pr
   }
 }
 
+
+
+function mapSymbolToBinance(symbol: string): string {
+  const upper = symbol.toUpperCase();
+  if (upper.endsWith('-USD')) return upper.replace('-USD', 'USDT').replace(/-/g, '');
+  return upper.replace(/-/g, '');
+}
+
+function mapTfToBinance(tf: Timeframe): string {
+  // Binance supports: 1m,5m,15m,30m,1h,4h,1d
+  return tf;
+}
+
+async function fetchBinanceKlines(symbol: string, tf: Timeframe, limit = 500): Promise<DydxCandle[]> {
+  const bSymbol = mapSymbolToBinance(symbol);
+  const interval = mapTfToBinance(tf);
+  const url = new URL('https://api.binance.com/api/v3/klines');
+  url.searchParams.set('symbol', bSymbol);
+  url.searchParams.set('interval', interval);
+  url.searchParams.set('limit', String(limit));
+
+  const res = await fetch(url.toString(), { headers: { accept: 'application/json' } });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Binance klines failed: ${res.status} ${text}`);
+  }
+  const raw = (await res.json()) as any[];
+
+  // Each item: [ openTime, open, high, low, close, volume, closeTime, ... ]
+  return raw.map((k: any): DydxCandle => {
+    const openTime = Number(k[0]); // ms
+    return {
+      time: openTime,
+      open: parseFloat(k[1]),
+      high: parseFloat(k[2]),
+      low: parseFloat(k[3]),
+      close: parseFloat(k[4]),
+      volume: k[5] !== undefined ? parseFloat(k[5]) : undefined,
+      timeframe: tf,
+      symbol,
+    };
+  });
+}
+
+function mapSymbolToOkx(symbol: string): string {
+  // BTC-USD -> BTC-USDT preferred
+  const upper = symbol.toUpperCase();
+  if (upper.endsWith('-USD')) return upper.replace('-USD', '-USDT');
+  return upper;
+}
+
+function mapTfToOkx(tf: Timeframe): string {
+  // OKX: 1m, 5m, 15m, 30m, 1H, 4H, 1D
+  switch (tf) {
+    case '1h': return '1H';
+    case '4h': return '4H';
+    case '1d': return '1D';
+    default: return tf;
+  }
+}
+
+async function fetchOkxCandles(symbol: string, tf: Timeframe, limit = 500): Promise<DydxCandle[]> {
+  const oSymbol = mapSymbolToOkx(symbol);
+  const bar = mapTfToOkx(tf);
+  const url = new URL('https://www.okx.com/api/v5/market/candles');
+  url.searchParams.set('instId', oSymbol);
+  url.searchParams.set('bar', bar);
+  url.searchParams.set('limit', String(limit));
+
+  const res = await fetch(url.toString(), { headers: { accept: 'application/json' } });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`OKX candles failed: ${res.status} ${text}`);
+  }
+  const json = (await res.json()) as { data?: any[] };
+  const raw = json?.data ?? [];
+
+  // OKX returns newest-first arrays: [ts, o, h, l, c, vol, volCcy, volCcyQuote, confirm]
+  return raw
+    .slice()
+    .reverse()
+    .map((k: any): DydxCandle => ({
+      time: Number(k[0]),
+      open: parseFloat(k[1]),
+      high: parseFloat(k[2]),
+      low: parseFloat(k[3]),
+      close: parseFloat(k[4]),
+      volume: k[5] !== undefined ? parseFloat(k[5]) : undefined,
+      timeframe: tf,
+      symbol,
+    }));
+}
+
 export async function getCandles(
   symbol: string,
   tf: Timeframe,
@@ -124,9 +217,11 @@ export async function getCandles(
   const fromISO = normalizeIsoTime(params?.from);
   const toISO = normalizeIsoTime(params?.to);
 
+  let candles: DydxCandle[] = [];
+
   // Attempt 1: typical v4 candles endpoint
   try {
-    const data = await getJSON('candles', {
+    const data = await getJSON('candles/perpetualMarket', {
       market: symbol,
       resolution,
       fromISO,
@@ -134,30 +229,8 @@ export async function getCandles(
     });
 
     const list: AnyJson[] = data?.candles ?? data?.data ?? data ?? [];
-    if (!Array.isArray(list)) return [];
-
-    return list.map((c: AnyJson): DydxCandle => ({
-      time: toNumber(c?.startedAt ?? c?.t ?? c?.time ?? Date.now()),
-      open: toNumber(c?.open),
-      high: toNumber(c?.high),
-      low: toNumber(c?.low),
-      close: toNumber(c?.close),
-      volume: c?.volume !== undefined ? toNumber(c?.volume) : undefined,
-      timeframe: tf,
-      symbol,
-    }));
-  } catch (e) {
-    // Attempt 2: alternative param names (from/to)
-    try {
-      const data = await getJSON('candles', {
-        market: symbol,
-        resolution,
-        from: fromISO,
-        to: toISO,
-      });
-      const list: AnyJson[] = data?.candles ?? data?.data ?? data ?? [];
-      if (!Array.isArray(list)) return [];
-      return list.map((c: AnyJson): DydxCandle => ({
+    if (Array.isArray(list)) {
+      candles = list.map((c: AnyJson): DydxCandle => ({
         time: toNumber(c?.startedAt ?? c?.t ?? c?.time ?? Date.now()),
         open: toNumber(c?.open),
         high: toNumber(c?.high),
@@ -167,11 +240,51 @@ export async function getCandles(
         timeframe: tf,
         symbol,
       }));
+    }
+  } catch {
+    // Attempt 2: alternative param names (from/to)
+    try {
+      const data = await getJSON('candles/perpetualMarket', {
+        market: symbol,
+        resolution,
+        from: fromISO,
+        to: toISO,
+      });
+
+      const list: AnyJson[] = data?.candles ?? data?.data ?? data ?? [];
+      if (Array.isArray(list)) {
+        candles = list.map((c: AnyJson): DydxCandle => ({
+          time: toNumber(c?.startedAt ?? c?.t ?? c?.time ?? Date.now()),
+          open: toNumber(c?.open),
+          high: toNumber(c?.high),
+          low: toNumber(c?.low),
+          close: toNumber(c?.close),
+          volume: c?.volume !== undefined ? toNumber(c?.volume) : undefined,
+          timeframe: tf,
+          symbol,
+        }));
+      }
+    } catch {
+      // use empty
+    }
+  }
+
+  if (candles.length === 0) {
+    // Try OKX first (Binance may be region-blocked)
+    try {
+      const okx = await fetchOkxCandles(symbol, tf, 500);
+      if (okx.length) return okx;
+    } catch {}
+    try {
+      return await fetchBinanceKlines(symbol, tf, 500);
     } catch {
       return [];
     }
   }
+  return candles;
 }
+
+
 
 export async function getOraclePrices(): Promise<Record<string, number>> {
   // Some public indexer deployments don't expose /oracle; derive from markets.

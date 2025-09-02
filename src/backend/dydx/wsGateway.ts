@@ -45,13 +45,13 @@ export function attachDydxWsGateway(server: http.Server) {
       // client.send(JSON.stringify({ type: 'proxy_connected' }));
     });
 
-    upstream.on('message', (data) => {
+    upstream.on('message', (data: WebSocket.Data) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(data);
       }
     });
 
-    upstream.on('error', (err) => {
+    upstream.on('error', (err: Error) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify({ type: 'proxy_error', message: String(err?.message || err) }));
       }
@@ -63,7 +63,7 @@ export function attachDydxWsGateway(server: http.Server) {
     });
 
     // Forward client messages upstream
-    client.on('message', (data) => {
+    client.on('message', (data: WebSocket.Data) => {
       if (upstream.readyState === WebSocket.OPEN) {
         upstream.send(data);
       } else {
@@ -87,14 +87,14 @@ export function attachDydxWsGateway(server: http.Server) {
     if (!url.startsWith('/api/dydx/ws')) {
       return;
     }
-    wss.handleUpgrade(request, socket as any, head, (ws) => {
+    wss.handleUpgrade(request, socket as any, head, (ws: WebSocket) => {
       wss.emit('connection', ws, request);
     });
   });
 
   // Heartbeat to terminate dead clients
   const interval = setInterval(() => {
-    wss.clients.forEach((ws) => {
+    wss.clients.forEach((ws: WebSocket) => {
       // @ts-ignore
       if ((ws as any).isAlive === false) {
         return ws.terminate();

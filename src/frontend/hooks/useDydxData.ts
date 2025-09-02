@@ -31,13 +31,19 @@ export function useMarkets(symbols?: string[], options?: UseQueryOptions<DydxMar
 export function useCandles(
   symbol: string,
   tf: Timeframe,
-  range?: { from?: string; to?: string },
+  _range?: { from?: string; to?: string },
   options?: UseQueryOptions<DydxCandle[], Error>
 ) {
-  const r = range?.from || range?.to ? range : getDefaultRange(24);
+  // Temporarily omit from/to to allow backend fallbacks to return data reliably
   return useQuery<DydxCandle[], Error>({
-    queryKey: ['dydx', 'candles', symbol, tf, r.from, r.to],
-    queryFn: () => getCandles(symbol, tf, r),
+    queryKey: ['dydx', 'candles', symbol, tf],
+    queryFn: async () => {
+      const data = await getCandles(symbol, tf);
+      // eslint-disable-next-line no-console
+      console.log('useCandles fetched', { symbol, tf, length: data.length, sample: data[0] });
+      return data;
+    },
+    refetchInterval: 5000, // 5s polling for live updates
     staleTime: 15_000,
     gcTime: 60_000,
     ...options,

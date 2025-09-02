@@ -1,11 +1,9 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   DollarSign,
   Activity,
-  ArrowUpRight,
-  ArrowDownRight,
   Download,
   Calendar,
 } from "lucide-react";
@@ -16,16 +14,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "components/ui/tabs";
 import { Input } from "components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "components/ui/table";
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "components/ui/chart";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LineChart, Line } from "recharts";
-import { Switch } from "components/ui/switch";
 import { Label } from "components/ui/label";
 import { Textarea } from "components/ui/textarea";
 import { Separator } from "components/ui/separator";
 import { Progress } from "components/ui/progress";
 
-import { useMarkets, useOracle, useApiHealth } from "@/frontend/hooks/useDydxData";
-import { useChartCandles } from "@/frontend/hooks/useChartCandles";
+import { useMarkets, useOracle, useApiHealth, useCandles } from "@/frontend/hooks/useDydxData";
 import type { Timeframe, DydxCandle, DydxMarket } from "@/shared/types/trading";
 
 // Shared
@@ -158,29 +152,111 @@ const MarketsTable: React.FC = () => {
   );
 };
 
-// Real-time Market Chart using REAL candles
+/**
+ * MarketChart renders true candlesticks using lightweight-charts.
+ * It consumes useChartCandles which sources real data (dYdX first; otherwise a real exchange).
+ * No other components' data sources are modified by this change.
+ */
 const MarketChart: React.FC = () => {
   const [symbol, setSymbol] = useState<string>("BTC-USD");
   const [tf, setTf] = useState<Timeframe>("1h");
-  const { data, isLoading, isError } = useChartCandles(symbol, tf);
+  const { data, isLoading, isError } = useCandles(symbol, tf);
+  const [chartReady, setChartReady] = useState(false);
 
-  const chartData = useMemo(
-    () =>
-      (data ?? []).map((c: DydxCandle) => ({
-        time: new Date(c.time).toLocaleString(),
-        value: c.close,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-      })),
-    [data]
-  );
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<any>(null);
+  const seriesRef = useRef<any>(null);
+  const resizeObsRef = useRef<ResizeObserver | null>(null);
+
+  // Initialize chart once using CDN (avoids bundler ESM interop issues)
+  useEffect(() => {
+    let mounted = true;
+    if (!containerRef.current || chartRef.current) return;
+
+    const script = document.createElement("script");
+    script.src =
+      "https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js";
+    script.async = true;
+
+    script.onload = () => {
+      if (!mounted || !containerRef.current) return;
+      const lwc = (window as any).LightweightCharts;
+      if (!lwc || typeof lwc.createChart !== "function") {
+        console.error("LightweightCharts global not available");
+        return;
+      }
+
+      const chart = lwc.createChart(containerRef.current, {
+        width: containerRef.current.clientWidth,
+        height: 300,
+        layout: { background: { color: "transparent" }, textColor: "#cbd5e1" },
+        grid: {
+          vertLines: { color: "rgba(120,120,120,0.2)" },
+          horzLines: { color: "rgba(120,120,120,0.2)" },
+        },
+        timeScale: { borderColor: "rgba(120,120,120,0.2)" },
+        rightPriceScale: { borderColor: "rgba(120,120,120,0.2)" },
+        crosshair: { mode: 1 },
+      });
+
+      const series = chart.addCandlestickSeries({
+        upColor: "#16a34a",
+        downColor: "#ef4444",
+        borderUpColor: "#16a34a",
+        borderDownColor: "#ef4444",
+        wickUpColor: "#16a34a",
+        wickDownColor: "#ef4444",
+      });
+
+      chartRef.current = chart;
+      seriesRef.current = series;
+      setChartReady(true);
+
+      const ro = new ResizeObserver((entries) => {
+        const cr = entries[0]?.contentRect;
+        if (cr && cr.width > 0) chart.applyOptions({ width: Math.floor(cr.width) });
+      });
+      ro.observe(containerRef.current);
+      resizeObsRef.current = ro;
+    };
+
+    document.head.appendChild(script);
+
+    return () => {
+      mounted = false;
+      resizeObsRef.current?.disconnect();
+      resizeObsRef.current = null;
+      chartRef.current?.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+      try {
+        document.head.removeChild(script);
+      } catch {}
+    };
+  }, []);
+
+  // Update series when data changes
+  useEffect(() => {
+    if (!seriesRef.current || !chartRef.current || !chartReady) return;
+    const src: DydxCandle[] = (data as DydxCandle[] | undefined) ?? [];
+    const candles = src.map((c: DydxCandle) => ({
+      time: Math.floor(c.time / 1000), // seconds since epoch
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    }));
+    // eslint-disable-next-line no-console
+    console.log("MarketChart setData length:", candles.length, "sample:", candles[0]);
+    seriesRef.current.setData(candles);
+    chartRef.current?.timeScale().fitContent();
+  }, [data, chartReady]);
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Market Chart</CardTitle>
-        <CardDescription>Live candles from dYdX Indexer</CardDescription>
+        <CardDescription>Live candles for {symbol}</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="flex gap-2 mb-4">
@@ -217,33 +293,12 @@ const MarketChart: React.FC = () => {
         </div>
 
         {isError && <div className="text-sm text-red-500">Failed to load candles.</div>}
-
-        <ChartContainer
-          config={{
-            value: { label: "Close", color: "hsl(var(--chart-1))" },
-          }}
-          className="h-[300px]"
-        >
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" hide />
-              <YAxis />
-              <ChartTooltip content={<ChartTooltipContent />} />
-              <Area
-                type="monotone"
-                dataKey="value"
-                stroke="var(--color-value)"
-                fill="var(--color-value)"
-                fillOpacity={0.3}
-                isAnimationActive={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </ChartContainer>
+        <div ref={containerRef} className="h-[300px] w-full rounded-md border" />
 
         <div className="mt-2 text-xs text-muted-foreground">
-          {isLoading ? "Loading candles..." : `Showing ${chartData.length} points`}
+          {isLoading
+            ? "Loading candles..."
+            : `Showing ${((data as DydxCandle[] | undefined)?.length ?? 0)} candles (${symbol}, ${tf})`}
         </div>
       </CardContent>
     </Card>
@@ -254,7 +309,7 @@ const MarketChart: React.FC = () => {
 const CandleHistory: React.FC = () => {
   const [symbol, setSymbol] = useState<string>("BTC-USD");
   const [tf, setTf] = useState<Timeframe>("1h");
-  const { data, isLoading, isError } = useChartCandles(symbol, tf);
+  const { data, isLoading, isError } = useCandles(symbol, tf);
 
   return (
     <div className="space-y-4">
@@ -325,11 +380,11 @@ const CandleHistory: React.FC = () => {
                       <TableCell>—</TableCell>
                     </TableRow>
                   ))
-                : (data ?? [])
+                : ((data as DydxCandle[] | undefined) ?? [])
                     .slice()
                     .reverse()
                     .slice(0, 50)
-                    .map((c) => (
+                    .map((c: DydxCandle) => (
                       <TableRow key={c.time}>
                         <TableCell>{new Date(c.time).toLocaleString()}</TableCell>
                         <TableCell>{c.open}</TableCell>

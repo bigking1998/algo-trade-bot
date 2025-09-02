@@ -7,8 +7,6 @@ import type {
   WalletInfo,
 } from '@/shared/types/trading';
 
-const API_BASE = ''; // Vite proxies /api to http://localhost:3001
-
 async function apiGet<T>(path: string, params?: Record<string, string | number | boolean | undefined>): Promise<T> {
   const url = new URL(`/api${path}`, window.location.origin);
   if (params) {
