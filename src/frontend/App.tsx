@@ -20,6 +20,7 @@ import { Separator } from "components/ui/separator";
 import { Progress } from "components/ui/progress";
 
 import { useMarkets, useOracle, useApiHealth, useCandles } from "@/frontend/hooks/useDydxData";
+import { usePhantomWallet } from "@/frontend/hooks/usePhantomWallet";
 import type { Timeframe, DydxCandle, DydxMarket } from "@/shared/types/trading";
 
 // Shared
@@ -159,7 +160,7 @@ const MarketsTable: React.FC = () => {
  */
 const MarketChart: React.FC = () => {
   const [symbol, setSymbol] = useState<string>("BTC-USD");
-  const [tf, setTf] = useState<Timeframe>("1h");
+  const [tf, setTf] = useState<Timeframe>("1m");
   const { data, isLoading, isError } = useCandles(symbol, tf);
   const [chartReady, setChartReady] = useState(false);
 
@@ -194,7 +195,14 @@ const MarketChart: React.FC = () => {
           vertLines: { color: "rgba(120,120,120,0.2)" },
           horzLines: { color: "rgba(120,120,120,0.2)" },
         },
-        timeScale: { borderColor: "rgba(120,120,120,0.2)" },
+        timeScale: { 
+          borderColor: "rgba(120,120,120,0.2)",
+          timeVisible: true,
+          secondsVisible: true,
+          rightOffset: 5,
+          barSpacing: 8,
+          minBarSpacing: 4
+        },
         rightPriceScale: { borderColor: "rgba(120,120,120,0.2)" },
         crosshair: { mode: 1 },
       });
@@ -239,18 +247,33 @@ const MarketChart: React.FC = () => {
   useEffect(() => {
     if (!seriesRef.current || !chartRef.current || !chartReady) return;
     const src: DydxCandle[] = (data as DydxCandle[] | undefined) ?? [];
-    const candles = src.map((c: DydxCandle) => ({
-      time: Math.floor(c.time / 1000), // seconds since epoch
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
+    const candles = src
+      .map((c: DydxCandle) => ({
+        time: Math.floor(c.time / 1000), // seconds since epoch
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      }))
+      .sort((a, b) => a.time - b.time); // Ensure proper time ordering
+    
     // eslint-disable-next-line no-console
-    console.log("MarketChart setData length:", candles.length, "sample:", candles[0]);
+    console.log("MarketChart setData length:", candles.length, "latest:", candles[candles.length - 1]);
+    
     seriesRef.current.setData(candles);
-    chartRef.current?.timeScale().fitContent();
-  }, [data, chartReady]);
+    
+    // For 1m timeframe, zoom to show last 2 hours for better detail
+    if (tf === '1m' && candles.length > 0) {
+      const latest = candles[candles.length - 1].time;
+      const twoHoursAgo = latest - (2 * 60 * 60); // 2 hours in seconds
+      chartRef.current?.timeScale().setVisibleRange({
+        from: twoHoursAgo,
+        to: latest + 300 // Add 5 minutes padding to the right
+      });
+    } else {
+      chartRef.current?.timeScale().fitContent();
+    }
+  }, [data, chartReady, tf]);
 
   return (
     <Card>
@@ -295,10 +318,18 @@ const MarketChart: React.FC = () => {
         {isError && <div className="text-sm text-red-500">Failed to load candles.</div>}
         <div ref={containerRef} className="h-[300px] w-full rounded-md border" />
 
-        <div className="mt-2 text-xs text-muted-foreground">
-          {isLoading
-            ? "Loading candles..."
-            : `Showing ${((data as DydxCandle[] | undefined)?.length ?? 0)} candles (${symbol}, ${tf})`}
+        <div className="mt-2 flex justify-between items-center text-xs text-muted-foreground">
+          <span>
+            {isLoading
+              ? "Loading candles..."
+              : `Showing ${((data as DydxCandle[] | undefined)?.length ?? 0)} candles (${symbol}, ${tf})`}
+          </span>
+          {tf === '1m' && (
+            <div className="flex items-center gap-1">
+              <div className={`h-2 w-2 rounded-full ${isLoading ? 'bg-yellow-500' : 'bg-green-500'} animate-pulse`} />
+              <span>Live updates every 1s</span>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -308,7 +339,7 @@ const MarketChart: React.FC = () => {
 // Simple Candle Table (REAL data) replacing mock trade history
 const CandleHistory: React.FC = () => {
   const [symbol, setSymbol] = useState<string>("BTC-USD");
-  const [tf, setTf] = useState<Timeframe>("1h");
+  const [tf, setTf] = useState<Timeframe>("1m");
   const { data, isLoading, isError } = useCandles(symbol, tf);
 
   return (
@@ -490,6 +521,335 @@ const StrategyBuilder: React.FC = () => {
   );
 };
 
+// Auto Trading Dashboard - Complete trading interface
+const AutoTradingDashboard: React.FC = () => {
+  const [isTrading, setIsTrading] = useState(false);
+  const [selectedStrategy, setSelectedStrategy] = useState<string>("");
+  const [positionSize, setPositionSize] = useState(10);
+  const [stopLoss, setStopLoss] = useState(2);
+  const [takeProfit, setTakeProfit] = useState(5);
+  const [maxPositions, setMaxPositions] = useState(3);
+
+  // Real Phantom wallet integration
+  const {
+    connected: walletConnected,
+    connecting: walletConnecting,
+    publicKey: walletPublicKey,
+    error: walletError,
+    connect: connectWallet,
+    disconnect: disconnectWallet,
+    isPhantomInstalled
+  } = usePhantomWallet();
+
+  // Mock active positions (to be replaced with real position data)
+  const [activePositions, setActivePositions] = useState([
+    { symbol: "BTC-USD", size: 0.1, entryPrice: 63500, currentPrice: 63750, pnl: 25.0, side: "LONG" },
+    { symbol: "ETH-USD", size: 2.5, entryPrice: 2420, currentPrice: 2435, pnl: 37.5, side: "LONG" }
+  ]);
+
+  const handleConnectWallet = async () => {
+    try {
+      if (!isPhantomInstalled) {
+        alert("Phantom wallet is not installed. Please install Phantom from phantom.app and refresh the page.");
+        window.open("https://phantom.app/", "_blank");
+        return;
+      }
+      
+      await connectWallet();
+    } catch (error) {
+      console.error("Failed to connect wallet:", error);
+    }
+  };
+
+  const handleStartTrading = () => {
+    if (!walletConnected) {
+      alert("Please connect your wallet first!");
+      return;
+    }
+    if (!selectedStrategy) {
+      alert("Please select a strategy!");
+      return;
+    }
+    setIsTrading(true);
+    console.log("Starting automated trading with wallet:", walletPublicKey);
+    // TODO: Start the automated trading engine
+  };
+
+  const handleStopTrading = () => {
+    setIsTrading(false);
+    // TODO: Stop the automated trading engine
+  };
+
+  const handleEmergencyStop = () => {
+    setIsTrading(false);
+    // TODO: Close all positions and stop trading
+    alert("Emergency stop activated! All positions will be closed.");
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Trading Control Panel */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Automated Trading Control</CardTitle>
+          <CardDescription>
+            Configure and control your automated trading system
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Wallet Connection */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label className="text-sm font-medium">Phantom Wallet Connection</Label>
+              <div className="flex flex-col gap-2 mt-1">
+                <div className="flex items-center gap-2">
+                  {walletConnected ? (
+                    <>
+                      <div className="h-3 w-3 bg-green-500 rounded-full" />
+                      <span className="text-sm font-mono">
+                        {walletPublicKey?.slice(0, 8)}...{walletPublicKey?.slice(-8)}
+                      </span>
+                      <Button 
+                        onClick={disconnectWallet} 
+                        size="sm" 
+                        variant="outline"
+                        className="ml-2"
+                      >
+                        Disconnect
+                      </Button>
+                    </>
+                  ) : (
+                    <Button 
+                      onClick={handleConnectWallet} 
+                      size="sm"
+                      disabled={walletConnecting}
+                    >
+                      {walletConnecting ? "Connecting..." : "Connect Phantom Wallet"}
+                    </Button>
+                  )}
+                </div>
+                {walletError && (
+                  <div className="text-xs text-red-500 mt-1">
+                    {walletError}
+                  </div>
+                )}
+                {!isPhantomInstalled && !walletConnected && (
+                  <div className="text-xs text-yellow-600 mt-1">
+                    Phantom wallet not detected. <a href="https://phantom.app/" target="_blank" rel="noopener noreferrer" className="underline">Install Phantom</a>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div>
+              <Label className="text-sm font-medium">Trading Status</Label>
+              <div className="flex items-center gap-2 mt-1">
+                <div className={`h-3 w-3 rounded-full ${isTrading ? 'bg-green-500' : 'bg-red-500'}`} />
+                <span className="text-sm font-medium">
+                  {isTrading ? 'Active Trading' : 'Trading Stopped'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Strategy Selection */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="strategy-select">Active Strategy</Label>
+              <Select value={selectedStrategy} onValueChange={setSelectedStrategy}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select trading strategy" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ema-cross">EMA Crossover</SelectItem>
+                  <SelectItem value="rsi-mean-revert">RSI Mean Reversion</SelectItem>
+                  <SelectItem value="breakout">Breakout Strategy</SelectItem>
+                  <SelectItem value="grid">Grid Trading</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="position-size">Position Size (%)</Label>
+              <Input
+                id="position-size"
+                type="number"
+                value={positionSize}
+                onChange={(e) => setPositionSize(Number(e.target.value))}
+                placeholder="10"
+              />
+            </div>
+          </div>
+
+          {/* Risk Management */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <Label htmlFor="stop-loss">Stop Loss (%)</Label>
+              <Input
+                id="stop-loss"
+                type="number"
+                value={stopLoss}
+                onChange={(e) => setStopLoss(Number(e.target.value))}
+                placeholder="2.0"
+              />
+            </div>
+            <div>
+              <Label htmlFor="take-profit">Take Profit (%)</Label>
+              <Input
+                id="take-profit"
+                type="number"
+                value={takeProfit}
+                onChange={(e) => setTakeProfit(Number(e.target.value))}
+                placeholder="5.0"
+              />
+            </div>
+            <div>
+              <Label htmlFor="max-positions">Max Positions</Label>
+              <Input
+                id="max-positions"
+                type="number"
+                value={maxPositions}
+                onChange={(e) => setMaxPositions(Number(e.target.value))}
+                placeholder="3"
+              />
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Control Buttons */}
+          <div className="flex items-center gap-4">
+            {!isTrading ? (
+              <Button 
+                onClick={handleStartTrading} 
+                size="lg"
+                className="bg-green-600 hover:bg-green-700"
+              >
+                🚀 Start Auto Trading
+              </Button>
+            ) : (
+              <Button 
+                onClick={handleStopTrading} 
+                size="lg"
+                variant="secondary"
+              >
+                ⏸️ Stop Trading
+              </Button>
+            )}
+            
+            <Button 
+              onClick={handleEmergencyStop} 
+              size="lg"
+              variant="destructive"
+            >
+              🛑 Emergency Stop
+            </Button>
+
+            <div className="flex-1" />
+            
+            {isTrading && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
+                <span>Trading actively with {selectedStrategy}</span>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Active Positions */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Active Positions</CardTitle>
+          <CardDescription>Monitor your current trading positions</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Symbol</TableHead>
+                <TableHead>Side</TableHead>
+                <TableHead>Size</TableHead>
+                <TableHead>Entry Price</TableHead>
+                <TableHead>Current Price</TableHead>
+                <TableHead>P&L</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {activePositions.length > 0 ? (
+                activePositions.map((position, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="font-medium">{position.symbol}</TableCell>
+                    <TableCell>
+                      <Badge variant={position.side === 'LONG' ? 'default' : 'secondary'}>
+                        {position.side}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{position.size}</TableCell>
+                    <TableCell>${position.entryPrice.toLocaleString()}</TableCell>
+                    <TableCell>${position.currentPrice.toLocaleString()}</TableCell>
+                    <TableCell>
+                      <span className={position.pnl >= 0 ? 'text-green-600' : 'text-red-600'}>
+                        ${position.pnl > 0 ? '+' : ''}{position.pnl.toFixed(2)}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <Button size="sm" variant="outline">
+                        Close
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                    No active positions
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* Trading Performance */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Today's P&L</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">+$127.50</div>
+            <p className="text-xs text-muted-foreground">+2.3% portfolio</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Win Rate</CardTitle>
+            <Activity className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">68%</div>
+            <p className="text-xs text-muted-foreground">17 wins, 8 losses</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Active Trades</CardTitle>
+            <Activity className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{activePositions.length}</div>
+            <p className="text-xs text-muted-foreground">of {maxPositions} max</p>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
 // Status Bar (shows internal state + API connectivity)
 const StatusBar: React.FC = () => {
   const health = useApiHealth();
@@ -577,10 +937,11 @@ const TradingBotDashboard: React.FC = () => {
         </div>
 
         <Tabs defaultValue="portfolio" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="portfolio">Markets</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
             <TabsTrigger value="strategies">Strategies</TabsTrigger>
+            <TabsTrigger value="trading">Auto Trading</TabsTrigger>
           </TabsList>
 
           <TabsContent value="portfolio" className="space-y-6">
@@ -600,6 +961,10 @@ const TradingBotDashboard: React.FC = () => {
 
           <TabsContent value="strategies">
             <StrategyBuilder />
+          </TabsContent>
+
+          <TabsContent value="trading">
+            <AutoTradingDashboard />
           </TabsContent>
         </Tabs>
       </div>
