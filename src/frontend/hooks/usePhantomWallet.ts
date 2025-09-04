@@ -8,6 +8,8 @@ interface PhantomProvider {
   disconnect(): Promise<void>;
   signTransaction(transaction: any): Promise<any>;
   signAllTransactions(transactions: any[]): Promise<any[]>;
+  on?: (event: string, callback: (data?: any) => void) => void;
+  off?: (event: string, callback: (data?: any) => void) => void;
 }
 
 interface WalletState {

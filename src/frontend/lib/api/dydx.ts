@@ -83,9 +83,89 @@ export async function submitOrder(order: OrderRequest, signed?: unknown): Promis
 }
 
 /**
+ * Get real trading positions for connected wallet
+ * GET /api/positions?address=...
+ */
+export async function getPositions(walletAddress: string): Promise<any[]> {
+  return apiGet<any[]>('/positions', { address: walletAddress });
+}
+
+/**
+ * Get real trading performance/P&L data
+ * GET /api/trading/performance?address=...
+ */
+export async function getTradingPerformance(walletAddress: string): Promise<{
+  dailyPnl: number;
+  winRate: number;
+  totalTrades: number;
+  wins: number;
+  losses: number;
+}> {
+  return apiGet('/trading/performance', { address: walletAddress });
+}
+
+/**
+ * Run backtest for a strategy
+ * POST /api/backtest
+ */
+export async function runBacktest(backtestRequest: {
+  symbol: string;
+  timeframe: string;
+  fromDate: string;
+  toDate: string;
+  strategy: string;
+  parameters: Record<string, any>;
+}): Promise<{
+  trades: any[];
+  metrics: {
+    totalPnl: number;
+    winRate: number;
+    totalTrades: number;
+    winningTrades: number;
+    losingTrades: number;
+    maxDrawdown: number;
+    sharpeRatio?: number;
+  };
+}> {
+  return apiPost('/backtest', backtestRequest);
+}
+
+/**
  * Wallet lookup (server route to be implemented)
  * GET /api/wallet/:address
  */
 export async function getWallet(address: string): Promise<WalletInfo> {
   return apiGet<WalletInfo>(`/wallet/${encodeURIComponent(address)}`);
+}
+
+/**
+ * Get active orders
+ * GET /api/dydx/orders/active
+ */
+export async function getActiveOrders(): Promise<any> {
+  return apiGet('/dydx/orders/active');
+}
+
+/**
+ * Create a new order
+ * POST /api/dydx/orders/create
+ */
+export async function createOrder(order: OrderRequest): Promise<OrderResponse> {
+  return apiPost<OrderResponse>('/dydx/orders/create', { order });
+}
+
+/**
+ * Cancel an order
+ * DELETE /api/dydx/orders/:orderId
+ */
+export async function cancelOrder(orderId: string): Promise<any> {
+  const res = await fetch(`/api/dydx/orders/${orderId}`, {
+    method: 'DELETE',
+    headers: { accept: 'application/json' },
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(`DELETE /api/dydx/orders/${orderId} failed: ${res.status} ${msg}`);
+  }
+  return res.json();
 }

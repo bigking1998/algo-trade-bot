@@ -2,14 +2,6 @@ import { useQuery, UseQueryOptions } from '@tanstack/react-query';
 import { getMarkets, getCandles, getOraclePrices } from '@/frontend/lib/api/dydx';
 import type { DydxCandle, DydxMarket, Timeframe } from '@/shared/types/trading';
 
-/**
- * Returns ISO strings for a time window ending now.
- */
-function getDefaultRange(hoursBack = 24) {
-  const to = new Date();
-  const from = new Date(to.getTime() - hoursBack * 60 * 60 * 1000);
-  return { from: from.toISOString(), to: to.toISOString() };
-}
 
 /**
  * Markets query. Default symbols: BTC-USD, ETH-USD

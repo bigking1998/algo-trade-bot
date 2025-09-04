@@ -66,7 +66,7 @@ export function startCandleStream(
         const high = parseFloat(k[2]);
         const low = parseFloat(k[3]);
         const close = parseFloat(k[4]);
-        const volume = k[5] !== undefined ? parseFloat(k[5]) : undefined;
+        const volume = k[5] !== undefined ? parseFloat(k[5]) : 0;
         const confirm = String(k[8] ?? "0");
         const type = confirm === "1" ? "final" : "partial";
         const candle: DydxCandle = {
@@ -76,8 +76,6 @@ export function startCandleStream(
           low,
           close,
           volume,
-          timeframe: tf,
-          symbol,
         };
         onCandle(candle, type);
       }

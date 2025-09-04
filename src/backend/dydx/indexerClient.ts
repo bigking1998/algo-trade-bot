@@ -152,7 +152,7 @@ async function fetchBinanceKlines(symbol: string, tf: Timeframe, limit = 500): P
       high: parseFloat(k[2]),
       low: parseFloat(k[3]),
       close: parseFloat(k[4]),
-      volume: k[5] !== undefined ? parseFloat(k[5]) : undefined,
+      volume: k[5] !== undefined ? parseFloat(k[5]) : 0,
       timeframe: tf,
       symbol,
     };
@@ -202,7 +202,7 @@ async function fetchOkxCandles(symbol: string, tf: Timeframe, limit = 500): Prom
       high: parseFloat(k[2]),
       low: parseFloat(k[3]),
       close: parseFloat(k[4]),
-      volume: k[5] !== undefined ? parseFloat(k[5]) : undefined,
+      volume: k[5] !== undefined ? parseFloat(k[5]) : 0,
       timeframe: tf,
       symbol,
     }));
@@ -236,7 +236,7 @@ export async function getCandles(
         high: toNumber(c?.high),
         low: toNumber(c?.low),
         close: toNumber(c?.close),
-        volume: c?.volume !== undefined ? toNumber(c?.volume) : undefined,
+        volume: c?.volume !== undefined ? toNumber(c?.volume) : 0,
         timeframe: tf,
         symbol,
       }));
@@ -259,7 +259,7 @@ export async function getCandles(
           high: toNumber(c?.high),
           low: toNumber(c?.low),
           close: toNumber(c?.close),
-          volume: c?.volume !== undefined ? toNumber(c?.volume) : undefined,
+          volume: c?.volume !== undefined ? toNumber(c?.volume) : 0,
           timeframe: tf,
           symbol,
         }));
@@ -291,7 +291,7 @@ export async function getOraclePrices(): Promise<Record<string, number>> {
   try {
     const mkts = await getMarkets(['BTC-USD', 'ETH-USD']);
     const out: Record<string, number> = {};
-    for (const m of mkts) out[m.symbol] = m.oraclePrice;
+    for (const m of mkts) out[m.symbol] = m.oraclePrice ?? 0;
     return out;
   } catch {
     // final fallback
@@ -301,7 +301,7 @@ export async function getOraclePrices(): Promise<Record<string, number>> {
   const mkts = await getMarkets(['BTC-USD', 'ETH-USD']);
   const out: Record<string, number> = {};
   for (const m of mkts) {
-    out[m.symbol] = m.oraclePrice;
+    out[m.symbol] = m.oraclePrice ?? 0;
   }
   return out;
 }

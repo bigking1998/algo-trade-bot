@@ -60,6 +60,24 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    // Mock positions endpoint
+    if (pathname === '/api/positions') {
+      if (req.method !== 'GET') return methodNotAllowed(res);
+      return sendJSON(res, 200, []); // Return empty array for now
+    }
+
+    // Mock trading performance endpoint  
+    if (pathname === '/api/trading/performance') {
+      if (req.method !== 'GET') return methodNotAllowed(res);
+      return sendJSON(res, 200, {
+        dailyPnl: 0,
+        winRate: 0,
+        totalTrades: 0,
+        wins: 0,
+        losses: 0
+      });
+    }
+
     // Placeholder root route
     if (pathname === '/api' || pathname === '/api/') {
       if (req.method !== 'GET') return methodNotAllowed(res);
