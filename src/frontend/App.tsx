@@ -597,7 +597,25 @@ const StrategyBuilder: React.FC = () => {
 };
 
 // Auto Trading Dashboard - Complete trading interface
-const AutoTradingDashboard: React.FC = () => {
+interface WalletProps {
+  walletConnected: boolean;
+  walletConnecting: boolean;
+  walletPublicKey: string | null;
+  walletError: string | null;
+  connectWallet: () => Promise<string>;
+  disconnectWallet: () => void;
+  isPhantomInstalled: boolean;
+}
+
+const AutoTradingDashboard: React.FC<WalletProps> = ({
+  walletConnected,
+  walletConnecting,
+  walletPublicKey,
+  walletError,
+  connectWallet,
+  disconnectWallet,
+  isPhantomInstalled
+}) => {
   const [isTrading, setIsTrading] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<string>("");
   const [positionSize, setPositionSize] = useState(10);
@@ -605,16 +623,18 @@ const AutoTradingDashboard: React.FC = () => {
   const [takeProfit, setTakeProfit] = useState(5);
   const [maxPositions, setMaxPositions] = useState(3);
 
-  // Real Phantom wallet integration
-  const {
-    connected: walletConnected,
-    connecting: walletConnecting,
-    publicKey: walletPublicKey,
-    error: walletError,
-    connect: connectWallet,
-    disconnect: disconnectWallet,
-    isPhantomInstalled
-  } = usePhantomWallet();
+  // Backtest state
+  const [showBacktestModal, setShowBacktestModal] = useState(false);
+  const [isBacktesting, setIsBacktesting] = useState(false);
+  const [backtestResults, setBacktestResults] = useState<any>(null);
+  const [backtestProgress, setBacktestProgress] = useState(0);
+  const [backtestSymbol, setBacktestSymbol] = useState("BTC-USD");
+  const [backtestTimeframe, setBacktestTimeframe] = useState<Timeframe>("1h");
+  const [backtestStartDate, setBacktestStartDate] = useState("2024-01-01");
+  const [backtestEndDate, setBacktestEndDate] = useState("2024-12-31");
+  const [backtestInitialBalance, setBacktestInitialBalance] = useState(10000);
+
+  // Wallet props are passed from parent component
 
   // Mock active positions (to be replaced with real position data)
   const [activePositions] = useState([
@@ -659,6 +679,267 @@ const AutoTradingDashboard: React.FC = () => {
     setIsTrading(false);
     // TODO: Close all positions and stop trading
     alert("Emergency stop activated! All positions will be closed.");
+  };
+
+  const handleBacktest = () => {
+    if (!selectedStrategy) {
+      alert("Please select a strategy to backtest!");
+      return;
+    }
+    setShowBacktestModal(true);
+  };
+
+  // Backtest engine implementation
+  const runBacktest = async () => {
+    setIsBacktesting(true);
+    setBacktestProgress(0);
+    setBacktestResults(null);
+
+    try {
+      // Fetch historical data
+      const response = await fetch(`/api/dydx/candles?symbol=${backtestSymbol}&timeframe=${backtestTimeframe}&from=${backtestStartDate}&to=${backtestEndDate}`);
+      const candlesData = await response.json();
+      
+      if (!candlesData || !Array.isArray(candlesData)) {
+        throw new Error('Invalid historical data received');
+      }
+
+      const candles: DydxCandle[] = candlesData;
+      console.log(`Running backtest on ${candles.length} candles from ${backtestStartDate} to ${backtestEndDate}`);
+
+      // Initialize backtest variables
+      let balance = backtestInitialBalance;
+      let position: any = null;
+      const trades: any[] = [];
+      let totalTrades = 0;
+      let winningTrades = 0;
+      let losingTrades = 0;
+      let maxDrawdown = 0;
+      let peak = backtestInitialBalance;
+      const equity: number[] = [balance];
+
+      // Strategy indicators
+      let ema20: number[] = [];
+      let ema50: number[] = [];
+      let rsi: number[] = [];
+
+      // Process each candle
+      for (let i = 0; i < candles.length; i++) {
+        const candle = candles[i];
+        const progress = Math.round((i / candles.length) * 100);
+        setBacktestProgress(progress);
+
+        // Calculate indicators
+        if (i >= 20) {
+          const closes = candles.slice(Math.max(0, i - 19), i + 1).map(c => c.close);
+          ema20.push(calculateEMA(closes, 20));
+        }
+        if (i >= 50) {
+          const closes = candles.slice(Math.max(0, i - 49), i + 1).map(c => c.close);
+          ema50.push(calculateEMA(closes, 50));
+        }
+        if (i >= 14) {
+          const closes = candles.slice(Math.max(0, i - 13), i + 1).map(c => c.close);
+          rsi.push(calculateRSI(closes, 14));
+        }
+
+        // Strategy logic
+        const signals = executeStrategy(selectedStrategy, {
+          candle,
+          index: i,
+          ema20: ema20[ema20.length - 1],
+          ema50: ema50[ema50.length - 1],
+          rsi: rsi[rsi.length - 1],
+          position
+        });
+
+        // Process buy signals
+        if (signals.buy && !position && balance > 0) {
+          const positionSizeAmount = (balance * positionSize) / 100;
+          const quantity = positionSizeAmount / candle.close;
+          
+          position = {
+            type: 'LONG',
+            entryPrice: candle.close,
+            quantity: quantity,
+            entryTime: candle.time,
+            stopLoss: candle.close * (1 - stopLoss / 100),
+            takeProfit: candle.close * (1 + takeProfit / 100)
+          };
+          balance -= positionSizeAmount;
+        }
+
+        // Process sell signals or stop loss/take profit
+        if (position && (signals.sell || 
+            candle.low <= position.stopLoss || 
+            candle.high >= position.takeProfit)) {
+          
+          let exitPrice = candle.close;
+          let exitReason = 'Signal';
+          
+          if (candle.low <= position.stopLoss) {
+            exitPrice = position.stopLoss;
+            exitReason = 'Stop Loss';
+          } else if (candle.high >= position.takeProfit) {
+            exitPrice = position.takeProfit;
+            exitReason = 'Take Profit';
+          }
+
+          const positionValue = position.quantity * exitPrice;
+          const pnl = positionValue - (position.quantity * position.entryPrice);
+          const pnlPercent = (pnl / (position.quantity * position.entryPrice)) * 100;
+          
+          balance += positionValue;
+          totalTrades++;
+          
+          if (pnl > 0) {
+            winningTrades++;
+          } else {
+            losingTrades++;
+          }
+
+          trades.push({
+            entryTime: position.entryTime,
+            exitTime: candle.time,
+            entryPrice: position.entryPrice,
+            exitPrice: exitPrice,
+            quantity: position.quantity,
+            pnl: pnl,
+            pnlPercent: pnlPercent,
+            exitReason: exitReason,
+            duration: candle.time - position.entryTime
+          });
+
+          position = null;
+        }
+
+        // Update equity curve
+        let currentEquity = balance;
+        if (position) {
+          currentEquity += position.quantity * candle.close;
+        }
+        equity.push(currentEquity);
+
+        // Track drawdown
+        if (currentEquity > peak) {
+          peak = currentEquity;
+        }
+        const drawdown = ((peak - currentEquity) / peak) * 100;
+        if (drawdown > maxDrawdown) {
+          maxDrawdown = drawdown;
+        }
+
+        // Small delay for progress animation
+        if (i % 100 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      }
+
+      // Calculate final results
+      const finalBalance = balance + (position ? position.quantity * candles[candles.length - 1].close : 0);
+      const totalReturn = ((finalBalance - backtestInitialBalance) / backtestInitialBalance) * 100;
+      const winRate = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0;
+      const avgTrade = totalTrades > 0 ? trades.reduce((sum, t) => sum + t.pnl, 0) / totalTrades : 0;
+      const bestTrade = trades.length > 0 ? Math.max(...trades.map(t => t.pnl)) : 0;
+      const worstTrade = trades.length > 0 ? Math.min(...trades.map(t => t.pnl)) : 0;
+      
+      const results = {
+        initialBalance: backtestInitialBalance,
+        finalBalance: finalBalance,
+        totalReturn: totalReturn,
+        totalTrades: totalTrades,
+        winningTrades: winningTrades,
+        losingTrades: losingTrades,
+        winRate: winRate,
+        maxDrawdown: maxDrawdown,
+        avgTrade: avgTrade,
+        bestTrade: bestTrade,
+        worstTrade: worstTrade,
+        trades: trades,
+        equity: equity,
+        symbol: backtestSymbol,
+        timeframe: backtestTimeframe,
+        startDate: backtestStartDate,
+        endDate: backtestEndDate,
+        strategy: selectedStrategy
+      };
+
+      setBacktestResults(results);
+      console.log('Backtest completed:', results);
+      
+    } catch (error) {
+      console.error('Backtest failed:', error);
+      alert('Backtest failed: ' + (error as Error).message);
+    } finally {
+      setIsBacktesting(false);
+      setBacktestProgress(100);
+    }
+  };
+
+  // Helper functions for technical indicators
+  const calculateEMA = (prices: number[], period: number): number => {
+    if (prices.length < period) return prices[prices.length - 1];
+    const multiplier = 2 / (period + 1);
+    let ema = prices.slice(0, period).reduce((sum, price) => sum + price, 0) / period;
+    for (let i = period; i < prices.length; i++) {
+      ema = (prices[i] * multiplier) + (ema * (1 - multiplier));
+    }
+    return ema;
+  };
+
+  const calculateRSI = (prices: number[], period: number): number => {
+    if (prices.length < period + 1) return 50;
+    let gains = 0;
+    let losses = 0;
+    for (let i = 1; i <= period; i++) {
+      const change = prices[i] - prices[i - 1];
+      if (change > 0) gains += change;
+      else losses += Math.abs(change);
+    }
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    const rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
+  };
+
+  // Strategy execution logic
+  const executeStrategy = (strategy: string, data: any) => {
+    const { candle, ema20, ema50, rsi, position } = data;
+    let buy = false;
+    let sell = false;
+
+    switch (strategy) {
+      case 'ema-cross':
+        if (ema20 && ema50) {
+          buy = ema20 > ema50 && !position;
+          sell = ema20 < ema50 && position;
+        }
+        break;
+      
+      case 'rsi-mean-revert':
+        if (rsi) {
+          buy = rsi < 30 && !position;
+          sell = rsi > 70 && position;
+        }
+        break;
+      
+      case 'breakout':
+        // Simple breakout strategy (needs more data for proper implementation)
+        buy = !position && Math.random() > 0.95; // Placeholder
+        sell = position && Math.random() > 0.98; // Placeholder
+        break;
+      
+      case 'grid':
+        // Grid trading logic (simplified)
+        buy = !position && Math.random() > 0.97; // Placeholder
+        sell = position && Math.random() > 0.97; // Placeholder
+        break;
+      
+      default:
+        break;
+    }
+
+    return { buy, sell };
   };
 
   return (
@@ -818,6 +1099,14 @@ const AutoTradingDashboard: React.FC = () => {
               🛑 Emergency Stop
             </Button>
 
+            <Button 
+              onClick={handleBacktest} 
+              size="lg"
+              variant="outline"
+            >
+              📊 Backtest Strategy
+            </Button>
+
             <div className="flex-1" />
             
             {isTrading && (
@@ -921,6 +1210,279 @@ const AutoTradingDashboard: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Backtest Modal */}
+      {showBacktestModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-4xl max-h-[90vh] overflow-y-auto m-4">
+            <CardHeader>
+              <CardTitle>Strategy Backtest</CardTitle>
+              <CardDescription>
+                Test your {selectedStrategy} strategy on historical data
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Backtest Parameters */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div>
+                  <Label htmlFor="backtest-symbol">Trading Pair</Label>
+                  <Select value={backtestSymbol} onValueChange={setBacktestSymbol}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="BTC-USD">BTC-USD</SelectItem>
+                      <SelectItem value="ETH-USD">ETH-USD</SelectItem>
+                      <SelectItem value="SOL-USD">SOL-USD</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="backtest-timeframe">Timeframe</Label>
+                  <Select value={backtestTimeframe} onValueChange={(val) => setBacktestTimeframe(val as Timeframe)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TF_OPTIONS.map((tf) => (
+                        <SelectItem key={tf} value={tf}>{tf}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="initial-balance">Initial Balance ($)</Label>
+                  <Input
+                    id="initial-balance"
+                    type="number"
+                    value={backtestInitialBalance}
+                    onChange={(e) => setBacktestInitialBalance(Number(e.target.value))}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="start-date">Start Date</Label>
+                  <Input
+                    id="start-date"
+                    type="date"
+                    value={backtestStartDate}
+                    onChange={(e) => setBacktestStartDate(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="end-date">End Date</Label>
+                  <Input
+                    id="end-date"
+                    type="date"
+                    value={backtestEndDate}
+                    onChange={(e) => setBacktestEndDate(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Strategy Parameters Summary */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Strategy Parameters</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Strategy</Label>
+                      <div className="font-medium">{selectedStrategy}</div>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Position Size</Label>
+                      <div className="font-medium">{positionSize}%</div>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Stop Loss</Label>
+                      <div className="font-medium">{stopLoss}%</div>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Take Profit</Label>
+                      <div className="font-medium">{takeProfit}%</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Progress Bar */}
+              {isBacktesting && (
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span>Backtesting Progress</span>
+                    <span>{backtestProgress}%</span>
+                  </div>
+                  <Progress value={backtestProgress} className="w-full" />
+                  <p className="text-xs text-muted-foreground text-center">
+                    Processing historical data and executing strategy...
+                  </p>
+                </div>
+              )}
+
+              {/* Backtest Results */}
+              {backtestResults && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-semibold">Backtest Results</h3>
+                    <Badge variant={backtestResults.totalReturn > 0 ? "default" : "destructive"}>
+                      {backtestResults.totalReturn > 0 ? 'Profitable' : 'Loss'}
+                    </Badge>
+                  </div>
+                  
+                  {/* Key Metrics */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <Card>
+                      <CardContent className="p-4">
+                        <div className="text-2xl font-bold text-green-600">
+                          {backtestResults.totalReturn.toFixed(2)}%
+                        </div>
+                        <p className="text-xs text-muted-foreground">Total Return</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-4">
+                        <div className="text-2xl font-bold">
+                          ${backtestResults.finalBalance.toLocaleString()}
+                        </div>
+                        <p className="text-xs text-muted-foreground">Final Balance</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-4">
+                        <div className="text-2xl font-bold">
+                          {backtestResults.winRate.toFixed(1)}%
+                        </div>
+                        <p className="text-xs text-muted-foreground">Win Rate</p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardContent className="p-4">
+                        <div className="text-2xl font-bold text-red-600">
+                          -{backtestResults.maxDrawdown.toFixed(2)}%
+                        </div>
+                        <p className="text-xs text-muted-foreground">Max Drawdown</p>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Detailed Stats */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">Trading Statistics</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        <div className="flex justify-between">
+                          <span>Total Trades:</span>
+                          <span className="font-medium">{backtestResults.totalTrades}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Winning Trades:</span>
+                          <span className="font-medium text-green-600">{backtestResults.winningTrades}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Losing Trades:</span>
+                          <span className="font-medium text-red-600">{backtestResults.losingTrades}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Average Trade:</span>
+                          <span className="font-medium">${backtestResults.avgTrade.toFixed(2)}</span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">Performance</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-2">
+                        <div className="flex justify-between">
+                          <span>Best Trade:</span>
+                          <span className="font-medium text-green-600">${backtestResults.bestTrade.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Worst Trade:</span>
+                          <span className="font-medium text-red-600">${backtestResults.worstTrade.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Period:</span>
+                          <span className="font-medium">{backtestStartDate} to {backtestEndDate}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Symbol:</span>
+                          <span className="font-medium">{backtestSymbol}</span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Trade History */}
+                  {backtestResults.trades.length > 0 && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">Recent Trades</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="max-h-64 overflow-y-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Entry</TableHead>
+                                <TableHead>Exit</TableHead>
+                                <TableHead>P&L</TableHead>
+                                <TableHead>Return %</TableHead>
+                                <TableHead>Reason</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {backtestResults.trades.slice(-10).map((trade: any, index: number) => (
+                                <TableRow key={index}>
+                                  <TableCell>${trade.entryPrice.toFixed(2)}</TableCell>
+                                  <TableCell>${trade.exitPrice.toFixed(2)}</TableCell>
+                                  <TableCell className={trade.pnl >= 0 ? 'text-green-600' : 'text-red-600'}>
+                                    ${trade.pnl.toFixed(2)}
+                                  </TableCell>
+                                  <TableCell className={trade.pnlPercent >= 0 ? 'text-green-600' : 'text-red-600'}>
+                                    {trade.pnlPercent.toFixed(2)}%
+                                  </TableCell>
+                                  <TableCell>{trade.exitReason}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              )}
+
+              {/* Modal Actions */}
+              <div className="flex justify-end gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    setShowBacktestModal(false);
+                    setBacktestResults(null);
+                    setBacktestProgress(0);
+                  }}
+                  disabled={isBacktesting}
+                >
+                  {backtestResults ? 'Close' : 'Cancel'}
+                </Button>
+                {!backtestResults && (
+                  <Button 
+                    onClick={runBacktest}
+                    disabled={isBacktesting}
+                  >
+                    {isBacktesting ? 'Running...' : 'Start Backtest'}
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };
@@ -1799,7 +2361,7 @@ const TradingBotDashboard: React.FC = () => {
     connected: walletConnected,
     connecting: walletConnecting,
     publicKey: walletPublicKey,
-    // error: walletError,
+    error: walletError,
     connect: connectWallet,
     disconnect: disconnectWallet,
     isPhantomInstalled
@@ -1909,7 +2471,15 @@ const TradingBotDashboard: React.FC = () => {
               </TabsList>
 
               <TabsContent value="dashboard">
-                <AutoTradingDashboard />
+                <AutoTradingDashboard 
+                  walletConnected={walletConnected}
+                  walletConnecting={walletConnecting}
+                  walletPublicKey={walletPublicKey}
+                  walletError={walletError}
+                  connectWallet={connectWallet}
+                  disconnectWallet={disconnectWallet}
+                  isPhantomInstalled={isPhantomInstalled}
+                />
               </TabsContent>
 
               <TabsContent value="trade">
