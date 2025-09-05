@@ -175,3 +175,72 @@ export interface TradeHistoryResponse {
   page: number;
   pageSize: number;
 }
+
+// Position Management Types
+export interface Position {
+  id: string;
+  symbol: string;
+  side: 'long' | 'short';
+  quantity: number;
+  entryPrice: number;
+  currentPrice: number;
+  unrealizedPnL: number;
+  unrealizedPnLPercent: number;
+  marketValue: number;
+  strategyId?: string;
+  openedAt: Date;
+  lastUpdatedAt: Date;
+  stopLoss?: number;
+  takeProfit?: number;
+  leverage?: number;
+  margin?: number;
+  liquidationPrice?: number;
+}
+
+export interface PositionSummary {
+  totalPositions: number;
+  totalUnrealizedPnL: number;
+  totalUnrealizedPnLPercent: number;
+  totalMarketValue: number;
+  longPositions: number;
+  shortPositions: number;
+  largestPosition: string;
+  riskExposure: number;
+}
+
+export interface OrderPlacementRequest {
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  type: 'MARKET' | 'LIMIT' | 'STOP_LOSS' | 'TAKE_PROFIT' | 'STOP_LIMIT';
+  quantity: number;
+  price?: number;
+  stopPrice?: number;
+  timeInForce?: 'GTC' | 'IOC' | 'FOK';
+  reduceOnly?: boolean;
+  strategyId?: string;
+  positionId?: string;
+}
+
+export interface PositionSizeCalculation {
+  symbol: string;
+  riskAmount: number;
+  riskPercent: number;
+  entryPrice: number;
+  stopLoss: number;
+  recommendedQuantity: number;
+  maxQuantity: number;
+  positionValue: number;
+  leverage: number;
+  margin: number;
+}
+
+export interface RiskMetrics {
+  portfolioHeat: number;
+  maxRiskPerTrade: number;
+  totalExposure: number;
+  availableBalance: number;
+  marginUtilization: number;
+  riskRewardRatio: number;
+  maxDrawdown: number;
+  sharpeRatio: number;
+}

@@ -1,6 +1,8 @@
 import * as http from 'http';
 import { URL } from 'url';
 import { handleDydxRoute } from './routes/dydx';
+import { handleMLRoute } from './routes/ml';
+import { getDatabaseManager } from './database/DatabaseManager';
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
@@ -48,16 +50,59 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // ML routes
+    if (await handleMLRoute(req, res, url)) {
+      return;
+    }
+
     // Health check endpoint
     if (pathname === '/api/health') {
       if (req.method !== 'GET') return methodNotAllowed(res);
 
-      return sendJSON(res, 200, {
-        status: 'ok',
-        service: 'algo-trade-bot-backend',
-        time: new Date().toISOString(),
-        version: process.env.npm_package_version || 'dev',
-      });
+      try {
+        const dbManager = getDatabaseManager();
+        let databaseHealth = null;
+        
+        try {
+          // Get comprehensive database health status
+          databaseHealth = await dbManager.getHealthStatus();
+        } catch (dbError) {
+          // Database not initialized or unavailable
+          databaseHealth = {
+            error: dbError instanceof Error ? dbError.message : 'Database unavailable',
+            initialized: false
+          };
+        }
+
+        const poolStatus = dbManager.getPoolStatus();
+        
+        // Determine overall status
+        let overallStatus = 'ok';
+        if (
+          (databaseHealth && 'error' in databaseHealth && databaseHealth.error) || 
+          !poolStatus.connected
+        ) {
+          overallStatus = 'degraded';
+        }
+
+        return sendJSON(res, 200, {
+          status: overallStatus,
+          service: 'algo-trade-bot-backend',
+          time: new Date().toISOString(),
+          version: process.env.npm_package_version || 'dev',
+          database: databaseHealth,
+          connectionPool: poolStatus,
+        });
+      } catch (healthError) {
+        // Fallback to basic health check if database manager fails
+        return sendJSON(res, 200, {
+          status: 'degraded',
+          service: 'algo-trade-bot-backend',
+          time: new Date().toISOString(),
+          version: process.env.npm_package_version || 'dev',
+          error: 'Database manager unavailable',
+        });
+      }
     }
 
     // Mock positions endpoint
@@ -103,10 +148,22 @@ server.listen(PORT, () => {
 });
 
 // Graceful shutdown
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   console.log('\n[backend] shutting down...');
-  server.close(() => {
+  
+  // Close HTTP server
+  server.close(async () => {
     console.log('[backend] server closed');
+    
+    try {
+      // Shutdown database manager
+      const dbManager = getDatabaseManager();
+      await dbManager.shutdown();
+      console.log('[backend] database connections closed');
+    } catch (error) {
+      console.error('[backend] error during database shutdown:', error);
+    }
+    
     process.exit(0);
   });
 });

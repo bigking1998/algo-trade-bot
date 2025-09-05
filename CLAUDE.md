@@ -2,6 +2,178 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🚀 IMPLEMENTATION MISSION: Transform Dashboard to Production Trading Platform
+
+**CRITICAL CONTEXT**: This repository is undergoing a systematic transformation from a market data dashboard into a production-ready algorithmic trading platform over 32 weeks. We are following a comprehensive implementation plan with strict task-based development, agent specialization, and continuous validation.
+
+### 📋 MANDATORY TASK-BASED DEVELOPMENT SYSTEM
+
+**⚠️ CRITICAL RULE: ONLY work on tasks from `COMPLETE_TASK_LIST.md` - NO exceptions!**
+
+All development must follow the structured 128-task system with these requirements:
+
+- **Task Selection**: Only work on tasks marked as "ready" (all dependencies completed)
+- **Unique Task ID**: Each task has a specific ID (DB-001, BE-001, FE-001, etc.)
+- **Clear Acceptance Criteria**: Every task defines exactly what "done" means
+- **Agent Specialization**: Work only on tasks matching your agent type
+- **Dependency Respect**: Never start a task until prerequisites are 100% complete
+- **Validation Mandatory**: Every task must pass all validation steps before proceeding
+
+### 📊 COMPLETE TASK SYSTEM OVERVIEW
+
+**Total Implementation Scope**: 128 tasks across 32 weeks (1,856 hours)
+
+**Current Status**: Review `COMPLETE_TASK_LIST.md` for full task specifications
+
+**Phase 1 Priority Tasks (Weeks 1-8)**:
+- DB-001: PostgreSQL & TimescaleDB Setup
+- DB-002: Database Schema Implementation  
+- BE-001: Database Connection Manager
+- BE-007: Base Strategy Interface Design
+- BE-010: Technical Indicators Library
+- BE-016: Strategy Engine Core Implementation
+
+### 🎯 CURRENT DEVELOPMENT PHASE
+
+**Phase 1: Critical Foundations (Weeks 1-8)**
+- Database infrastructure with PostgreSQL + TimescaleDB
+- Strategy execution engine with technical indicators
+- Risk management and position management systems
+
+### 👥 AGENT SPECIALIZATION SYSTEM
+
+When working on this repository, identify your agent role:
+
+**DatabaseAgent** 🗄️
+- Database schema design and implementation
+- Migrations, queries, performance optimization
+- TimescaleDB configuration and time-series optimization
+
+**BackendAgent** ⚙️  
+- Node.js/TypeScript backend development
+- Strategy engine, risk management, trading logic
+- API endpoints and business logic implementation
+
+**FrontendAgent** 🎨
+- React/TypeScript component development
+- shadcn/ui integration, responsive design
+- Real-time data visualization and user experience
+
+**MLAgent** 🧠
+- Machine learning pipeline with TensorFlow.js
+- Feature engineering and model training
+- Prediction systems and ML-enhanced strategies
+
+**DevOpsAgent** 🚀
+- Infrastructure setup and deployment
+- CI/CD pipelines and monitoring
+- Production readiness and scaling
+
+**TestingAgent** 🧪
+- Test automation and quality assurance
+- Performance testing and validation
+- System integration verification
+
+### ⚠️ MANDATORY DEVELOPMENT RULES - NO EXCEPTIONS
+
+1. **TASK-ONLY DEVELOPMENT**: Work exclusively on tasks from `COMPLETE_TASK_LIST.md`
+2. **AGENT SPECIALIZATION**: Only accept tasks matching your agent designation
+3. **DEPENDENCY ENFORCEMENT**: Check task dependencies before starting - halt if not met
+4. **MANDATORY VALIDATION**: After each task, run complete validation sequence:
+   ```bash
+   npm run build          # ✅ Must compile successfully
+   npm run test           # ✅ All tests must pass
+   npm run test:integration # ✅ Integration tests must pass  
+   npm start              # ✅ System must start and function
+   npm run lint           # ✅ Code quality must pass
+   ```
+5. **ZERO REGRESSION POLICY**: System must remain fully functional after every change
+6. **ACCEPTANCE CRITERIA**: Every deliverable in task specification must be completed
+7. **DOCUMENTATION UPDATES**: Update all relevant documentation for changes made
+
+### 🚨 TASK EXECUTION PROTOCOL
+
+**Before Starting ANY Task:**
+1. ✅ **Verify Task ID**: Confirm task exists in `COMPLETE_TASK_LIST.md`
+2. ✅ **Check Dependencies**: Ensure all prerequisite tasks are 100% complete
+3. ✅ **Agent Match**: Confirm your agent type matches task assignment
+4. ✅ **Review Acceptance Criteria**: Understand exactly what constitutes completion
+5. ✅ **Validate Current System**: Ensure system works before making changes
+
+**After Completing ANY Task:**
+1. ✅ **Run Full Validation Suite**: All validation commands must pass
+2. ✅ **Verify Acceptance Criteria**: Every requirement must be met
+3. ✅ **Test System Integration**: Entire system must remain functional
+4. ✅ **Update Progress Tracking**: Mark task as complete in tracking system
+5. ✅ **Document Any Issues**: Record problems and solutions for future reference
+
+### 📋 TASK SELECTION PROCESS
+
+**Step 1: Identify Ready Tasks**
+- Review `COMPLETE_TASK_LIST.md` for tasks with completed dependencies
+- Current ready tasks: DB-001 (no dependencies), then DB-002, BE-001, etc.
+
+**Step 2: Agent Assignment Verification** 
+- 🗄️ DatabaseAgent: Tasks DB-001 through DB-006
+- ⚙️ BackendAgent: Tasks BE-001 through BE-065  
+- 🎨 FrontendAgent: Tasks FE-001 through FE-024
+- 🧠 MLAgent: Tasks ML-001 through ML-013
+- 🚀 DevOpsAgent: Tasks DO-001 through DO-009
+- 🧪 TestingAgent: Tasks TE-001 through TE-013
+
+**Step 3: Task Execution Request Format**
+```
+"I need you to act as [AgentType] and execute Task [ID]: [Title].
+
+Please review the complete task specification in COMPLETE_TASK_LIST.md 
+and implement all acceptance criteria including:
+- [List specific deliverables]
+- [Performance targets]
+- [Testing requirements]
+
+After completion, run the mandatory validation sequence."
+```
+
+### 📚 MANDATORY REFERENCE DOCUMENTS
+
+**PRIMARY TASK REFERENCE** (Must consult for every task):
+- 📋 `COMPLETE_TASK_LIST.md` - **ALL 128 TASKS** with specifications and acceptance criteria
+
+**SUPPORTING ARCHITECTURE DOCUMENTS**:
+- `IMPLEMENTATION_ROADMAP_2025.md` - 32-week strategic development plan  
+- `CAPABILITY_GAP_ANALYSIS.md` - Current state vs target capabilities
+- `STRATEGY_ENGINE_ARCHITECTURE.md` - Strategy system technical specification
+- `BACKTESTING_ENGINE_ARCHITECTURE.md` - Backtesting system design
+- `DATABASE_ARCHITECTURE.md` - Database design and optimization
+- `FREQTRADE_ANALYSIS_UPDATE_2025.md` - Technical reference and inspiration
+
+**⚠️ CRITICAL**: Every task must reference the specific requirements in `COMPLETE_TASK_LIST.md`. No work should begin without reviewing the exact task specification.
+
+### 🚨 EMERGENCY PROTOCOLS
+
+If the system breaks during development:
+1. **STOP immediately** - do not continue with additional changes
+2. **Revert the last change** that caused the issue
+3. **Run full validation suite** to ensure system recovery
+4. **Identify root cause** before attempting fix
+5. **Update task validation** to prevent similar issues
+
+### 🎯 SUCCESS METRICS
+
+Every task completion must achieve:
+- ✅ All acceptance criteria met
+- ✅ Unit and integration tests passing
+- ✅ Performance targets achieved
+- ✅ System remains fully functional
+- ✅ Documentation updated
+- ✅ No security vulnerabilities introduced
+
+### 💡 DEVELOPMENT PHILOSOPHY
+
+We are building a **production-ready, enterprise-grade algorithmic trading platform** that will compete with established solutions like Freqtrade while leveraging modern web technologies and superior user experience. Every line of code should reflect this ambition.
+
+**Quality over speed. Testing over assumptions. Architecture over quick fixes.**
+
 ## Development Commands
 
 ### Starting the Application

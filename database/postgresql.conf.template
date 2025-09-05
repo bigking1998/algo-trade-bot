@@ -1,0 +1,166 @@
+# PostgreSQL Configuration Template for Algorithmic Trading Bot
+# Task DB-001: PostgreSQL & TimescaleDB Installation and Configuration
+# This file provides production-ready settings for the trading platform
+
+# CONNECTIONS AND AUTHENTICATION
+#------------------------------------------------------------------------------
+
+# Connection Settings
+listen_addresses = 'localhost'          # Security: Only allow local connections initially
+port = 5432                             # Default PostgreSQL port
+max_connections = 100                   # Allow up to 100 total connections
+superuser_reserved_connections = 3      # Reserve connections for superuser
+
+# Connection Pooling and Resource Management
+shared_preload_libraries = 'timescaledb'       # Required for TimescaleDB
+max_worker_processes = 8                        # Optimize for trading workloads
+max_parallel_workers = 4                       # Parallel query execution
+max_parallel_workers_per_gather = 2           # Per-query parallelism
+
+# RESOURCE USAGE (MEMORY)
+#------------------------------------------------------------------------------
+
+# Memory Configuration (optimized for trading data processing)
+shared_buffers = 256MB                  # Database cache
+effective_cache_size = 1GB              # OS cache estimate
+work_mem = 16MB                         # Per-operation memory
+maintenance_work_mem = 256MB            # Maintenance operations
+max_stack_depth = 2MB                   # Stack depth limit
+
+# WRITE AHEAD LOG
+#------------------------------------------------------------------------------
+
+# WAL Settings (for data integrity and replication)
+wal_level = replica                     # Enable replication
+fsync = on                             # Ensure data durability
+synchronous_commit = on                # Ensure transaction durability
+wal_sync_method = fsync               # Sync method
+full_page_writes = on                 # Protect against partial page writes
+wal_compression = on                  # Compress WAL records
+wal_log_hints = on                    # Required for some backup tools
+
+# Archiving
+archive_mode = on                     # Enable WAL archiving
+archive_command = ''                  # To be configured based on backup strategy
+
+# REPLICATION
+#------------------------------------------------------------------------------
+
+# Standby Servers
+hot_standby = on                      # Allow read queries on standby
+max_wal_senders = 10                  # Maximum WAL sender processes
+max_replication_slots = 10            # Maximum replication slots
+track_commit_timestamp = on           # Track commit timestamps
+
+# QUERY TUNING
+#------------------------------------------------------------------------------
+
+# Planner Configuration
+random_page_cost = 1.1                # SSD-optimized random access cost
+effective_io_concurrency = 200        # Concurrent I/O operations
+seq_page_cost = 1.0                   # Sequential page cost
+
+# Query Planning
+default_statistics_target = 100       # Statistics collection target
+constraint_exclusion = partition      # Enable constraint exclusion
+cursor_tuple_fraction = 0.1           # Cursor tuple fraction
+
+# REPORTING AND LOGGING
+#------------------------------------------------------------------------------
+
+# Logging Configuration
+logging_collector = on                # Enable log collection
+log_destination = 'stderr'           # Log destination
+log_directory = 'pg_log'             # Log directory
+log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'  # Log filename pattern
+log_truncate_on_rotation = off        # Don't truncate logs
+log_rotation_age = 1d                 # Rotate daily
+log_rotation_size = 100MB             # Rotate at 100MB
+
+# What to Log
+log_min_messages = warning            # Minimum message level
+log_min_error_statement = error       # Log error statements
+log_min_duration_statement = 1000     # Log slow queries (>1s)
+log_checkpoints = on                  # Log checkpoint activity
+log_connections = on                  # Log connections
+log_disconnections = on               # Log disconnections
+log_lock_waits = on                   # Log lock waits
+log_statement = 'mod'                 # Log data-modifying statements
+log_temp_files = 10MB                 # Log temp files > 10MB
+
+# STATISTICS
+#------------------------------------------------------------------------------
+
+# Statistics Collection
+track_activities = on                 # Track running queries
+track_counts = on                     # Track table/index usage
+track_io_timing = on                  # Track I/O timing
+track_functions = all                 # Track function calls
+stats_temp_directory = 'pg_stat_tmp'  # Statistics temp directory
+
+# AUTOVACUUM PARAMETERS
+#------------------------------------------------------------------------------
+
+# Automated Maintenance
+autovacuum = on                       # Enable autovacuum
+log_autovacuum_min_duration = 0       # Log all autovacuum activities
+autovacuum_max_workers = 3            # Maximum autovacuum workers
+autovacuum_naptime = 1min             # Autovacuum sleep time
+autovacuum_vacuum_threshold = 50      # Minimum number of tuple updates/deletes
+autovacuum_analyze_threshold = 50     # Minimum number of tuple inserts/updates/deletes
+autovacuum_vacuum_scale_factor = 0.2  # Fraction of table size
+autovacuum_analyze_scale_factor = 0.1 # Fraction of table size
+
+# SSL SECURITY
+#------------------------------------------------------------------------------
+
+# SSL Configuration
+ssl = on                              # Enable SSL
+ssl_cert_file = 'server.crt'         # SSL certificate file
+ssl_key_file = 'server.key'          # SSL private key file
+ssl_ca_file = ''                      # SSL certificate authority file
+ssl_crl_file = ''                     # SSL certificate revocation list
+
+# SSL Cipher Configuration
+ssl_ciphers = 'HIGH:MEDIUM:+3DES:!aNULL' # Allowed SSL ciphers
+ssl_prefer_server_ciphers = on        # Prefer server cipher order
+ssl_ecdh_curve = 'prime256v1'         # ECDH curve
+ssl_min_protocol_version = 'TLSv1.2'  # Minimum TLS version
+
+# CLIENT CONNECTION DEFAULTS
+#------------------------------------------------------------------------------
+
+# Locale and Formatting
+datestyle = 'iso, mdy'               # Date style
+intervalstyle = 'postgres'           # Interval style
+timezone = 'UTC'                     # Use UTC for trading data
+lc_messages = 'en_US.UTF-8'         # Messages locale
+lc_monetary = 'en_US.UTF-8'         # Monetary locale
+lc_numeric = 'en_US.UTF-8'          # Numeric locale
+lc_time = 'en_US.UTF-8'             # Time locale
+
+# Other Defaults
+default_text_search_config = 'pg_catalog.english'  # Text search configuration
+
+# TIMESCALEDB SPECIFIC SETTINGS
+#------------------------------------------------------------------------------
+
+# TimescaleDB Configuration
+timescaledb.max_background_workers = 8         # Background workers
+timescaledb.last_tuned = '2025-09-05T00:00:00+00:00'  # Tuning timestamp
+timescaledb.last_tuned_version = '2.22.0'      # Tuned version
+
+# CUSTOM SETTINGS FOR TRADING PLATFORM
+#------------------------------------------------------------------------------
+
+# Trading Platform Optimizations
+checkpoint_completion_target = 0.9     # Spread out checkpoint I/O
+wal_buffers = 16MB                     # WAL buffer size
+commit_delay = 0                       # No commit delay for real-time trading
+commit_siblings = 5                    # Commit siblings threshold
+
+# Lock Configuration
+deadlock_timeout = 1s                  # Deadlock detection timeout
+lock_timeout = 30s                     # Lock acquisition timeout
+statement_timeout = 0                  # No statement timeout (handle in app)
+idle_in_transaction_session_timeout = 300000  # 5 minutes idle timeout
