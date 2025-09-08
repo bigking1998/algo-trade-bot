@@ -182,12 +182,11 @@ export class MockDataGenerator {
     return {
       totalValue,
       availableBalance,
+      totalPnL: (Math.random() - 0.3) * totalValue * 0.05, // -1.5% to +3.5% total P&L
+      totalPnLPercent: ((Math.random() - 0.3) * 0.05) * 100, // Convert to percentage
       positions,
-      timestamp: new Date(),
-      dailyPnl: (Math.random() - 0.5) * totalValue * 0.02, // ±2% daily P&L
-      totalPnl: (Math.random() - 0.3) * totalValue * 0.05, // -1.5% to +3.5% total P&L
-      marginUsed: totalValue * (1 - availableBalanceRatio) * 0.1, // 10% margin usage
-      marginAvailable: availableBalance * 0.8
+      orders: [], // Empty active orders for mock data
+      lastUpdated: new Date()
     };
   }
 
@@ -230,21 +229,20 @@ export class MockDataGenerator {
       trades.push({
         id: `trade_${i + 1}`,
         symbol,
-        side,
-        size,
-        entryPrice,
-        exitPrice,
-        entryTime,
-        exitTime,
-        pnl,
-        commission: size * entryPrice * 0.001, // 0.1% commission
+        side: side === 'sell' ? 'SELL' : 'BUY',
+        type: 'MARKET',
+        quantity: size,
+        price: entryPrice,
+        timestamp: entryTime,
         strategyId: `strategy_${(i % 3) + 1}`,
-        status: 'closed'
+        orderId: `order_${i + 1}`,
+        fees: size * entryPrice * 0.001, // 0.1% fees
+        commission: size * entryPrice * 0.001 // 0.1% commission (legacy)
       });
     }
     
-    // Sort trades by entry time
-    return trades.sort((a, b) => a.entryTime.getTime() - b.entryTime.getTime());
+    // Sort trades by timestamp
+    return trades.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   }
 
   /**
@@ -264,7 +262,7 @@ export class MockDataGenerator {
         positionSizing: 'fixed' as const
       },
       executionConfig: {
-        orderType: 'MARKET',
+        orderType: 'MARKET' as OrderType,
         slippage: 0.001,
         timeout: 5000,
         retries: 3
@@ -281,6 +279,7 @@ export class MockDataGenerator {
       case 'trend_following':
         return {
           ...baseConfig,
+          type: 'MOMENTUM' as StrategyType,
           parameters: {
             fastPeriod: 12,
             slowPeriod: 26,
@@ -294,6 +293,7 @@ export class MockDataGenerator {
       case 'mean_reversion':
         return {
           ...baseConfig,
+          type: 'MEAN_REVERSION' as StrategyType,
           parameters: {
             rsiPeriod: 14,
             overboughtLevel: 70,
@@ -308,6 +308,7 @@ export class MockDataGenerator {
       case 'momentum':
         return {
           ...baseConfig,
+          type: 'MOMENTUM' as StrategyType,
           parameters: {
             momentumPeriod: 10,
             minMomentum: 0.02,
@@ -321,6 +322,7 @@ export class MockDataGenerator {
       case 'arbitrage':
         return {
           ...baseConfig,
+          type: 'ARBITRAGE' as StrategyType,
           parameters: {
             minSpread: 0.001,
             maxSlippage: 0.0005,
@@ -721,12 +723,12 @@ export class MockDataGenerator {
       strategyId: `strategy_${Math.floor(Math.random() * 5)}`,
       symbol,
       side: Math.random() > 0.5 ? 'BUY' : 'SELL',
+      type: (Math.random() > 0.5 ? 'MARKET' : 'LIMIT') as OrderType,
       quantity: Math.random() * 10,
       price: Math.random() * 50000 + 10000,
-      fee: Math.random() * 10,
-      pnl: (Math.random() - 0.5) * 1000,
-      executedAt: new Date(),
-      orderType: Math.random() > 0.5 ? 'market' : 'limit'
+      timestamp: new Date(),
+      fees: Math.random() * 10,
+      commission: Math.random() * 10,
     };
   }
 }

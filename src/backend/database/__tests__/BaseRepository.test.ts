@@ -274,6 +274,9 @@ describe('BaseRepository Implementation Tests', () => {
         timeframes: ['1h'],
         config: {},
         parameters: {},
+        max_positions: 3,
+        max_risk_per_trade: 2.0,
+        max_portfolio_risk: 10.0,
       })).rejects.toThrow();
     });
 
@@ -299,6 +302,9 @@ describe('BaseRepository Implementation Tests', () => {
         timeframes: ['1h'],
         config: {},
         parameters: {},
+        max_positions: 3,
+        max_risk_per_trade: 2.0,
+        max_portfolio_risk: 10.0,
       })).rejects.toThrow();
     });
   });
@@ -450,6 +456,9 @@ describe('BaseRepository Implementation Tests', () => {
         timeframes: ['1h'],
         config: { fast_ema: 12, slow_ema: 26 },
         parameters: { risk_per_trade: 0.02 },
+        max_positions: 3,
+        max_risk_per_trade: 2.0,
+        max_portfolio_risk: 10.0,
       });
       testStrategyId = strategy.id;
     }

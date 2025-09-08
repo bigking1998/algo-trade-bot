@@ -309,7 +309,7 @@ describe('DatabaseManager - Task BE-001', () => {
       vi.advanceTimersByTime(30000);
 
       // Should be able to query again
-      const result = await dbManager.query('SELECT 1');
+      const result = await dbManager.query<{test: string}>('SELECT \'recovered\' as test');
       expect(result.rows[0].test).toBe('recovered');
 
       vi.useRealTimers();
@@ -366,7 +366,7 @@ describe('DatabaseManager - Task BE-001', () => {
 
       await dbManager.initialize();
 
-      const result = await dbManager.query('SELECT * FROM test', [], { key: 'test_key', ttl: 300 });
+      const result = await dbManager.query<{cached_result: string}>('SELECT * FROM test', [], { key: 'test_key', ttl: 300 });
       
       expect(result.rows[0].cached_result).toBe('from_cache');
       expect(mockPool.connect).not.toHaveBeenCalled();
@@ -419,7 +419,7 @@ describe('DatabaseManager - Task BE-001', () => {
       await dbManager.initialize();
 
       // Query should still work without cache
-      const result = await dbManager.query('SELECT * FROM test');
+      const result = await dbManager.query<{result: string}>('SELECT \'without_cache\' as result');
       expect(result.rows[0].result).toBe('without_cache');
     });
   });
@@ -536,7 +536,7 @@ describe('DatabaseManager - Task BE-001', () => {
 
       await dbManager.initialize();
 
-      const result = await dbManager.query('SELECT 1');
+      const result = await dbManager.query<{result: string}>('SELECT \'success\' as result');
       expect(result.rows[0].result).toBe('success');
       expect(callCount).toBe(3); // Should retry twice before succeeding
     });

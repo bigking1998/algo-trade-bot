@@ -115,8 +115,11 @@ describe('BacktestEngine Integration Tests', () => {
     mockStrategy = new MockStrategy({
       id: 'mock_strategy',
       name: 'Mock Strategy',
+      version: '1.0.0',
+      type: 'technical',
       symbols: ['BTC-USD'],
       timeframes: ['1h'],
+      maxConcurrentPositions: 3,
       parameters: {},
       riskProfile: {
         maxRiskPerTrade: 5,
@@ -124,6 +127,12 @@ describe('BacktestEngine Integration Tests', () => {
         stopLossType: 'fixed' as const,
         takeProfitType: 'fixed' as const,
         positionSizing: 'fixed' as const
+      },
+      performance: {
+        minWinRate: 0.5,
+        maxDrawdown: 0.2,
+        minSharpeRatio: 1.0,
+        benchmarkSymbol: 'BTC-USD'
       },
       execution: {
         orderType: 'market' as const,
@@ -397,8 +406,11 @@ describe('BacktestEngine Error Handling', () => {
     const mockStrategy = new MockStrategy({
       id: 'test',
       name: 'Test',
+      version: '1.0.0',
+      type: 'technical',
       symbols: ['BTC-USD'],
       timeframes: ['1h'],
+      maxConcurrentPositions: 3,
       parameters: {},
       riskProfile: { 
         maxRiskPerTrade: 5, 
@@ -406,6 +418,12 @@ describe('BacktestEngine Error Handling', () => {
         stopLossType: 'fixed' as const,
         takeProfitType: 'fixed' as const,
         positionSizing: 'fixed' as const
+      },
+      performance: {
+        minWinRate: 0.5,
+        maxDrawdown: 0.2,
+        minSharpeRatio: 1.0,
+        benchmarkSymbol: 'BTC-USD'
       },
       execution: { 
         orderType: 'market' as const,

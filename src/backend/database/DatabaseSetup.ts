@@ -121,7 +121,7 @@ export class DatabaseSetup extends EventEmitter {
       // Connection pooling settings (max 20 connections as per requirements)
       max: this.config.connectionPool.max,
       min: this.config.connectionPool.min,
-      idleTimeoutMillis: this.config.connectionPool.idleTimeoutMs,
+      idleTimeoutMillis: this.config.connectionPool.idleTimeoutMillis,
       connectionTimeoutMillis: this.config.connectionPool.connectionTimeoutMillis,
       
       // SSL configuration for security
