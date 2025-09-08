@@ -8,6 +8,7 @@
 
 import type { Strategy } from '../types/database.js';
 import type { IndicatorResult } from '../indicators/base/types.js';
+import type { StrategySignal, StrategySignalType } from './types.js';
 
 // =============================================================================
 // CORE STRATEGY DATA STRUCTURES
@@ -147,42 +148,21 @@ export interface PortfolioState {
 // =============================================================================
 
 /**
- * Enhanced strategy signal with detailed analysis
+ * Enhanced strategy signal analysis for data frames
+ * Extends the base StrategySignal from types.ts with additional analysis
  */
-export interface StrategySignal {
-  // Basic signal information
-  type: SignalType;
-  strength: number; // 0-1 signal strength
-  confidence: number; // 0-1 confidence level
-  timestamp: Date;
-  
-  // Trade recommendation
-  action: TradeAction;
-  symbol: string;
-  side: 'buy' | 'sell' | 'long' | 'short';
-  
-  // Position sizing
-  recommendedSize: number;
-  maxSize: number;
-  riskAmount: number;
-  
-  // Price levels
-  entryPrice?: number;
-  stopLoss?: number;
-  takeProfit?: number;
-  
+export interface StrategySignalAnalysis extends Omit<StrategySignal, 'indicators'> {
   // Signal analysis
   analysis: SignalAnalysis;
   
-  // Supporting data
+  // Supporting data (extended indicators that can include arrays)
   indicators: Record<string, number | number[]>;
   marketConditions: MarketConditionSummary;
   
   // Risk assessment
   riskAssessment: RiskAssessment;
   
-  // Metadata
-  strategyId: string;
+  // Additional metadata
   version: string;
   processingTime: number; // milliseconds
 }
@@ -683,4 +663,625 @@ export interface TrailingStopConfig {
   type: 'percent' | 'atr' | 'fixed';
   value: number;
   activation?: number;
+}
+
+// =============================================================================
+// DATA FRAME CLASSES - Task BE-007: Base Strategy Interface Design
+// =============================================================================
+
+/**
+ * MarketDataFrame - Efficient data structure for market data manipulation
+ * Provides pandas-like functionality for OHLCV data with performance optimization
+ */
+export class MarketDataFrame {
+  private data: OHLCV[];
+  private _indexMap: Map<number, number> = new Map();
+  private _dirty = true;
+
+  constructor(data: OHLCV[] = []) {
+    this.data = [...data].sort((a, b) => 
+      (typeof a.timestamp === 'number' ? a.timestamp : (a.timestamp as Date).getTime()) - 
+      (typeof b.timestamp === 'number' ? b.timestamp : (b.timestamp as Date).getTime())
+    );
+    this._buildIndex();
+  }
+
+  /**
+   * Build timestamp index for fast lookups
+   */
+  private _buildIndex(): void {
+    if (!this._dirty) return;
+    
+    this._indexMap.clear();
+    this.data.forEach((candle, index) => {
+      const timestamp = typeof candle.timestamp === 'number' ? candle.timestamp : (candle.timestamp as Date).getTime();
+      this._indexMap.set(timestamp, index);
+    });
+    this._dirty = false;
+  }
+
+  /**
+   * Get number of data points
+   */
+  get length(): number {
+    return this.data.length;
+  }
+
+  /**
+   * Check if frame is empty
+   */
+  get isEmpty(): boolean {
+    return this.data.length === 0;
+  }
+
+  /**
+   * Get latest candle
+   */
+  get latest(): OHLCV | null {
+    return this.data.length > 0 ? this.data[this.data.length - 1] : null;
+  }
+
+  /**
+   * Get oldest candle
+   */
+  get oldest(): OHLCV | null {
+    return this.data.length > 0 ? this.data[0] : null;
+  }
+
+  /**
+   * Add new candle data
+   */
+  addCandle(candle: OHLCV): void {
+    const timestamp = typeof candle.timestamp === 'number' ? candle.timestamp : (candle.timestamp as Date).getTime();
+    
+    // Check if this timestamp already exists
+    if (this._indexMap.has(timestamp)) {
+      const index = this._indexMap.get(timestamp)!;
+      this.data[index] = candle; // Update existing candle
+    } else {
+      this.data.push(candle);
+      this._dirty = true;
+      
+      // Keep data sorted
+      if (this.data.length > 1) {
+        const lastCandle = this.data[this.data.length - 2];
+        const lastTimestamp: number = typeof lastCandle.timestamp === 'number' 
+          ? lastCandle.timestamp 
+          : (lastCandle.timestamp as Date).getTime();
+        
+        if (timestamp < lastTimestamp) {
+          this.data.sort((a, b) => 
+            (typeof a.timestamp === 'number' ? a.timestamp : (a.timestamp as Date).getTime()) - 
+            (typeof b.timestamp === 'number' ? b.timestamp : (b.timestamp as Date).getTime())
+          );
+          this._dirty = true;
+        }
+      }
+    }
+  }
+
+  /**
+   * Get candle at specific index
+   */
+  getCandle(index: number): OHLCV | null {
+    return index >= 0 && index < this.data.length ? this.data[index] : null;
+  }
+
+  /**
+   * Get slice of data
+   */
+  slice(start: number, end?: number): MarketDataFrame {
+    const slicedData = this.data.slice(start, end);
+    return new MarketDataFrame(slicedData);
+  }
+
+  /**
+   * Get last n candles
+   */
+  tail(n: number): MarketDataFrame {
+    const start = Math.max(0, this.data.length - n);
+    return this.slice(start);
+  }
+
+  /**
+   * Get first n candles
+   */
+  head(n: number): MarketDataFrame {
+    return this.slice(0, n);
+  }
+
+  /**
+   * Get closes as array
+   */
+  getCloses(): number[] {
+    return this.data.map(candle => candle.close);
+  }
+
+  /**
+   * Get opens as array
+   */
+  getOpens(): number[] {
+    return this.data.map(candle => candle.open);
+  }
+
+  /**
+   * Get highs as array
+   */
+  getHighs(): number[] {
+    return this.data.map(candle => candle.high);
+  }
+
+  /**
+   * Get lows as array
+   */
+  getLows(): number[] {
+    return this.data.map(candle => candle.low);
+  }
+
+  /**
+   * Get volumes as array
+   */
+  getVolumes(): number[] {
+    return this.data.map(candle => candle.volume);
+  }
+
+  /**
+   * Get timestamps as array
+   */
+  getTimestamps(): number[] {
+    return this.data.map(candle => 
+      typeof candle.timestamp === 'number' ? candle.timestamp : (candle.timestamp as Date).getTime()
+    );
+  }
+
+  /**
+   * Calculate typical price (HLC/3)
+   */
+  getTypicalPrices(): number[] {
+    return this.data.map(candle => (candle.high + candle.low + candle.close) / 3);
+  }
+
+  /**
+   * Calculate true range
+   */
+  getTrueRanges(): number[] {
+    const trueRanges: number[] = [];
+    
+    for (let i = 0; i < this.data.length; i++) {
+      if (i === 0) {
+        trueRanges.push(this.data[i].high - this.data[i].low);
+      } else {
+        const current = this.data[i];
+        const previous = this.data[i - 1];
+        const tr = Math.max(
+          current.high - current.low,
+          Math.abs(current.high - previous.close),
+          Math.abs(current.low - previous.close)
+        );
+        trueRanges.push(tr);
+      }
+    }
+    
+    return trueRanges;
+  }
+
+  /**
+   * Get all data as array
+   */
+  toArray(): OHLCV[] {
+    return [...this.data];
+  }
+
+  /**
+   * Clear all data
+   */
+  clear(): void {
+    this.data = [];
+    this._indexMap.clear();
+    this._dirty = false;
+  }
+
+  /**
+   * Merge with another MarketDataFrame
+   */
+  merge(other: MarketDataFrame): MarketDataFrame {
+    const combined = [...this.data, ...other.data];
+    return new MarketDataFrame(combined);
+  }
+}
+
+/**
+ * IndicatorDataFrame - Efficient storage and manipulation of technical indicators
+ * Provides vectorized operations and time-aligned indicator values
+ */
+export class IndicatorDataFrame {
+  private indicators: Map<string, IndicatorSeries> = new Map();
+  private timestamps: number[] = [];
+
+  constructor() {}
+
+  /**
+   * Add indicator series
+   */
+  addIndicator(name: string, values: number[], timestamps?: number[]): void {
+    if (timestamps && timestamps.length !== values.length) {
+      throw new Error('Timestamps and values arrays must have same length');
+    }
+
+    const series: IndicatorSeries = {
+      name,
+      values: [...values],
+      timestamps: timestamps ? [...timestamps] : [...this.timestamps],
+      lastUpdated: new Date(),
+      isReady: values.length > 0 && !values.some(v => isNaN(v))
+    };
+
+    this.indicators.set(name, series);
+    
+    // Update global timestamps if needed
+    if (timestamps && timestamps.length > this.timestamps.length) {
+      this.timestamps = [...timestamps];
+    }
+  }
+
+  /**
+   * Update indicator value at specific index
+   */
+  updateIndicator(name: string, index: number, value: number): void {
+    const series = this.indicators.get(name);
+    if (!series) {
+      throw new Error(`Indicator ${name} not found`);
+    }
+
+    if (index >= 0 && index < series.values.length) {
+      series.values[index] = value;
+      series.lastUpdated = new Date();
+      series.isReady = !series.values.some(v => isNaN(v));
+    }
+  }
+
+  /**
+   * Get indicator values
+   */
+  getIndicator(name: string): number[] | null {
+    const series = this.indicators.get(name);
+    return series ? [...series.values] : null;
+  }
+
+  /**
+   * Get latest indicator value
+   */
+  getLatestValue(name: string): number | null {
+    const series = this.indicators.get(name);
+    if (!series || series.values.length === 0) return null;
+    return series.values[series.values.length - 1];
+  }
+
+  /**
+   * Get indicator value at specific index
+   */
+  getValue(name: string, index: number): number | null {
+    const series = this.indicators.get(name);
+    if (!series || index < 0 || index >= series.values.length) return null;
+    return series.values[index];
+  }
+
+  /**
+   * Check if indicator is ready (has valid values)
+   */
+  isReady(name: string): boolean {
+    const series = this.indicators.get(name);
+    return series ? series.isReady : false;
+  }
+
+  /**
+   * Get all indicator names
+   */
+  getIndicatorNames(): string[] {
+    return Array.from(this.indicators.keys());
+  }
+
+  /**
+   * Get indicator metadata
+   */
+  getIndicatorInfo(name: string): IndicatorSeries | null {
+    const series = this.indicators.get(name);
+    return series ? { ...series, values: [...series.values] } : null;
+  }
+
+  /**
+   * Remove indicator
+   */
+  removeIndicator(name: string): boolean {
+    return this.indicators.delete(name);
+  }
+
+  /**
+   * Clear all indicators
+   */
+  clear(): void {
+    this.indicators.clear();
+    this.timestamps = [];
+  }
+
+  /**
+   * Get number of data points
+   */
+  get length(): number {
+    return this.timestamps.length;
+  }
+
+  /**
+   * Get all indicators as object
+   */
+  toObject(): Record<string, number[]> {
+    const result: Record<string, number[]> = {};
+    this.indicators.forEach((series, name) => {
+      result[name] = [...series.values];
+    });
+    return result;
+  }
+
+  /**
+   * Slice indicators by index range
+   */
+  slice(start: number, end?: number): IndicatorDataFrame {
+    const sliced = new IndicatorDataFrame();
+    const slicedTimestamps = this.timestamps.slice(start, end);
+    
+    this.indicators.forEach((series, name) => {
+      const slicedValues = series.values.slice(start, end);
+      sliced.addIndicator(name, slicedValues, slicedTimestamps);
+    });
+    
+    return sliced;
+  }
+}
+
+/**
+ * SignalDataFrame - Manages trading signals with time alignment and filtering
+ * Provides efficient storage and retrieval of strategy signals
+ */
+export class SignalDataFrame {
+  private signals: StrategySignal[] = [];
+  private _indexMap: Map<string, number> = new Map(); // signal id -> index
+  private _timeIndex: Map<number, number[]> = new Map(); // timestamp -> signal indices
+
+  constructor(signals: StrategySignal[] = []) {
+    this.signals = [...signals].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    this._buildIndexes();
+  }
+
+  /**
+   * Build internal indexes for fast lookups
+   */
+  private _buildIndexes(): void {
+    this._indexMap.clear();
+    this._timeIndex.clear();
+
+    this.signals.forEach((signal, index) => {
+      this._indexMap.set(signal.id, index);
+      
+      const timestamp = signal.timestamp.getTime();
+      if (!this._timeIndex.has(timestamp)) {
+        this._timeIndex.set(timestamp, []);
+      }
+      this._timeIndex.get(timestamp)!.push(index);
+    });
+  }
+
+  /**
+   * Add new signal
+   */
+  addSignal(signal: StrategySignal): void {
+    // Check if signal already exists
+    if (this._indexMap.has(signal.id)) {
+      const index = this._indexMap.get(signal.id)!;
+      this.signals[index] = signal; // Update existing signal
+    } else {
+      this.signals.push(signal);
+      
+      // Maintain chronological order
+      this.signals.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      this._buildIndexes();
+    }
+  }
+
+  /**
+   * Get signal by ID
+   */
+  getSignal(id: string): StrategySignal | null {
+    const index = this._indexMap.get(id);
+    return index !== undefined ? this.signals[index] : null;
+  }
+
+  /**
+   * Get signals by time range
+   */
+  getSignalsInRange(startTime: Date, endTime: Date): StrategySignal[] {
+    const startTimestamp = startTime.getTime();
+    const endTimestamp = endTime.getTime();
+    
+    return this.signals.filter(signal => {
+      const timestamp = signal.timestamp.getTime();
+      return timestamp >= startTimestamp && timestamp <= endTimestamp;
+    });
+  }
+
+  /**
+   * Get latest signal
+   */
+  getLatestSignal(): StrategySignal | null {
+    return this.signals.length > 0 ? this.signals[this.signals.length - 1] : null;
+  }
+
+  /**
+   * Get latest signal by type
+   */
+  getLatestSignalByType(type: StrategySignalType): StrategySignal | null {
+    for (let i = this.signals.length - 1; i >= 0; i--) {
+      if (this.signals[i].type === type) {
+        return this.signals[i];
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Get signals by symbol
+   */
+  getSignalsBySymbol(symbol: string): StrategySignal[] {
+    return this.signals.filter(signal => signal.symbol === symbol);
+  }
+
+  /**
+   * Get signals by strategy ID
+   */
+  getSignalsByStrategy(strategyId: string): StrategySignal[] {
+    return this.signals.filter(signal => signal.strategyId === strategyId);
+  }
+
+  /**
+   * Filter signals by conditions
+   */
+  filter(predicate: (signal: StrategySignal) => boolean): SignalDataFrame {
+    const filtered = this.signals.filter(predicate);
+    return new SignalDataFrame(filtered);
+  }
+
+  /**
+   * Get signals with minimum confidence
+   */
+  getSignalsWithConfidence(minConfidence: number): StrategySignal[] {
+    return this.signals.filter(signal => signal.confidence >= minConfidence);
+  }
+
+  /**
+   * Get valid signals (not expired)
+   */
+  getValidSignals(currentTime: Date = new Date()): StrategySignal[] {
+    return this.signals.filter(signal => {
+      if (!signal.isValid) return false;
+      if (signal.expiresAt && signal.expiresAt < currentTime) return false;
+      return true;
+    });
+  }
+
+  /**
+   * Get last n signals
+   */
+  tail(n: number): SignalDataFrame {
+    const start = Math.max(0, this.signals.length - n);
+    const tailSignals = this.signals.slice(start);
+    return new SignalDataFrame(tailSignals);
+  }
+
+  /**
+   * Get first n signals
+   */
+  head(n: number): SignalDataFrame {
+    const headSignals = this.signals.slice(0, n);
+    return new SignalDataFrame(headSignals);
+  }
+
+  /**
+   * Remove signal by ID
+   */
+  removeSignal(id: string): boolean {
+    const index = this._indexMap.get(id);
+    if (index === undefined) return false;
+
+    this.signals.splice(index, 1);
+    this._buildIndexes();
+    return true;
+  }
+
+  /**
+   * Clear all signals
+   */
+  clear(): void {
+    this.signals = [];
+    this._indexMap.clear();
+    this._timeIndex.clear();
+  }
+
+  /**
+   * Get number of signals
+   */
+  get length(): number {
+    return this.signals.length;
+  }
+
+  /**
+   * Check if frame is empty
+   */
+  get isEmpty(): boolean {
+    return this.signals.length === 0;
+  }
+
+  /**
+   * Get all signals as array
+   */
+  toArray(): StrategySignal[] {
+    return [...this.signals];
+  }
+
+  /**
+   * Get signal statistics
+   */
+  getStatistics(): SignalStatistics {
+    const byType = new Map<StrategySignalType, number>();
+    let totalConfidence = 0;
+    let validSignals = 0;
+
+    this.signals.forEach(signal => {
+      byType.set(signal.type, (byType.get(signal.type) || 0) + 1);
+      totalConfidence += signal.confidence;
+      if (signal.isValid) validSignals++;
+    });
+
+    return {
+      total: this.signals.length,
+      validSignals,
+      invalidSignals: this.signals.length - validSignals,
+      averageConfidence: this.signals.length > 0 ? totalConfidence / this.signals.length : 0,
+      byType: Object.fromEntries(byType),
+      timeRange: this.signals.length > 0 ? {
+        start: this.signals[0].timestamp,
+        end: this.signals[this.signals.length - 1].timestamp
+      } : null
+    };
+  }
+
+  /**
+   * Merge with another SignalDataFrame
+   */
+  merge(other: SignalDataFrame): SignalDataFrame {
+    const combined = [...this.signals, ...other.signals];
+    return new SignalDataFrame(combined);
+  }
+}
+
+// =============================================================================
+// SUPPORTING INTERFACES FOR DATA FRAMES
+// =============================================================================
+
+interface IndicatorSeries {
+  name: string;
+  values: number[];
+  timestamps: number[];
+  lastUpdated: Date;
+  isReady: boolean;
+}
+
+interface SignalStatistics {
+  total: number;
+  validSignals: number;
+  invalidSignals: number;
+  averageConfidence: number;
+  byType: Record<string, number>;
+  timeRange: {
+    start: Date;
+    end: Date;
+  } | null;
 }

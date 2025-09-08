@@ -717,9 +717,9 @@ export class StrategyExecutor extends EventEmitter {
   }
 
   /**
-   * Check if strategy is running
+   * Check if strategy is currently running
    */
-  isRunning(): boolean {
+  isCurrentlyRunning(): boolean {
     return this.isRunning && !this.isPaused;
   }
 

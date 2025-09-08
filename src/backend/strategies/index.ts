@@ -7,6 +7,7 @@
 
 // Core strategy framework
 export { BaseStrategy } from './BaseStrategy.js';
+import { BaseStrategy } from './BaseStrategy.js';
 export type { 
   RiskManager,
   TechnicalIndicatorCalculator,
@@ -16,7 +17,15 @@ export type {
 
 // Strategy factory and management
 export { StrategyFactory, createStrategyFactory, createStrategy } from './StrategyFactory.js';
+import { StrategyFactory } from './StrategyFactory.js';
+export { StrategyManager } from './StrategyManager.js';
+export { StrategyContextFactory } from './StrategyContext.js';
 export type { StrategyType } from './StrategyFactory.js';
+export type { StrategyExecution, StrategyManagerConfig } from './StrategyManager.js';
+
+// Data frame classes - Task BE-007 deliverables
+export { MarketDataFrame, IndicatorDataFrame, SignalDataFrame } from './DataStructures.js';
+import { MarketDataFrame, IndicatorDataFrame, SignalDataFrame } from './DataStructures.js';
 
 // Type definitions
 export type {
@@ -258,6 +267,9 @@ export default {
   BaseStrategy,
   StrategyFactory: StrategyFactory,
   strategyFactory,
+  MarketDataFrame,
+  IndicatorDataFrame, 
+  SignalDataFrame,
   createSMAStrategy,
   getAvailableStrategies,
   validateStrategyConfig,

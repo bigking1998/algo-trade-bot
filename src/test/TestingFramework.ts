@@ -426,8 +426,8 @@ export class MockMarketDataProvider {
     this.subscriptions.clear();
   }
 
-  isConnected(): boolean {
-    return this.connected;
+  isMarketDataConnected(): boolean {
+    return this.isConnected;
   }
 
   subscribe(symbol: string, callback: (data: OHLCV) => void): void {

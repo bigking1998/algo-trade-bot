@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with TimescaleDB for local development
+  postgres:
+    image: timescale/timescaledb:latest-pg15
+    container_name: trading-bot-postgres-dev
+    environment:
+      POSTGRES_DB: trading_bot_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+      TIMESCALEDB_TELEMETRY: 'off'
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    networks:
+      - trading-bot-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d trading_bot_dev"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: trading-bot-redis-dev
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass redis_password
+    volumes:
+      - redis_data_dev:/data
+    networks:
+      - trading-bot-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 5
+
+  # Backend API service
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: trading-bot-backend-dev
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=trading_bot_dev
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redis_password
+      - JWT_SECRET=dev_jwt_secret_key_change_in_production
+      - CORS_ORIGIN=http://localhost:5173
+    volumes:
+      - ./src:/app/src
+      - ./database:/app/database
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - trading-bot-network
+    restart: unless-stopped
+
+  # Frontend React application
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: trading-bot-frontend-dev
+    ports:
+      - "80:80"
+    environment:
+      - NODE_ENV=development
+      - VITE_API_BASE_URL=http://localhost:3001/api
+    depends_on:
+      - backend
+    networks:
+      - trading-bot-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data_dev:
+    driver: local
+  redis_data_dev:
+    driver: local
+
+networks:
+  trading-bot-network:
+    driver: bridge

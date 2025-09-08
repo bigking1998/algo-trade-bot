@@ -6,7 +6,19 @@ export { ModelManager, modelManager } from './inference/ModelManager';
 export { PredictionEngine, predictionEngine } from './inference/PredictionEngine';
 export { ModelRegistry, modelRegistry } from './models/ModelRegistry';
 
-// Note: Main ML types file not found - types may be defined in feature engineering or other modules
+// ML Types and Interfaces
+export * from './types';
+
+// Prediction Models (ML-003) - Advanced prediction models
+export { PricePredictionModel, DEFAULT_PRICE_PREDICTION_CONFIGS } from './models/PricePredictionModel';
+export { MarketRegimeModel, DEFAULT_REGIME_CONFIG } from './models/MarketRegimeModel';
+export { VolatilityModel, DEFAULT_VOLATILITY_CONFIG } from './models/VolatilityModel';
+
+// Model Ensemble System
+export { ModelEnsemble, DEFAULT_ENSEMBLE_CONFIGS } from './ensemble/ModelEnsemble';
+
+// Model Training Framework
+export { ModelTrainer, DEFAULT_TRAINING_CONFIGS } from './training/ModelTrainer';
 
 // Feature Engineering (ML-002) - All feature types and components
 export * from './features';

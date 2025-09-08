@@ -209,7 +209,7 @@ export class MockDataGenerator {
     
     for (let i = 0; i < count; i++) {
       const symbol = symbols[Math.floor(Math.random() * symbols.length)];
-      const side = Math.random() > 0.5 ? 'buy' : 'sell';
+      const side = Math.random() > 0.5 ? 'BUY' : 'SELL';
       const isWin = Math.random() < winRate;
       
       // Generate realistic trade parameters
@@ -255,14 +255,26 @@ export class MockDataGenerator {
       id: `strategy_${Date.now()}`,
       name: `${type}_strategy`,
       type,
-      enabled: true,
-      symbols: this.DEFAULT_SYMBOLS.slice(0, 3),
-      timeframes: ['1m', '5m', '15m'],
-      maxPositions: 3,
-      riskPerTrade: 0.02,
       parameters: {},
-      createdAt: new Date(),
-      updatedAt: new Date()
+      riskConfig: {
+        maxRiskPerTrade: 0.02,
+        maxPortfolioRisk: 0.1,
+        stopLossType: 'fixed' as const,
+        takeProfitType: 'fixed' as const,
+        positionSizing: 'fixed' as const
+      },
+      executionConfig: {
+        orderType: 'MARKET',
+        slippage: 0.001,
+        timeout: 5000,
+        retries: 3
+      },
+      monitoringConfig: {
+        enableAlerts: true,
+        alertChannels: ['email'],
+        healthCheckInterval: 60000,
+        performanceReviewInterval: 3600000
+      }
     };
 
     switch (type) {
@@ -318,7 +330,7 @@ export class MockDataGenerator {
           }
         };
 
-      case 'ml_based':
+      case 'CUSTOM':
         return {
           ...baseConfig,
           parameters: {
@@ -344,9 +356,9 @@ export class MockDataGenerator {
     symbols: string[] = this.DEFAULT_SYMBOLS.slice(0, 5)
   ): Order[] {
     const orders: Order[] = [];
-    const statuses: OrderStatus[] = ['pending', 'filled', 'cancelled', 'rejected'];
-    const types: OrderType[] = ['market', 'limit', 'stop', 'stop_limit'];
-    const sides: OrderSide[] = ['buy', 'sell'];
+    const statuses: OrderStatus[] = ['PENDING', 'FILLED', 'CANCELLED', 'REJECTED'];
+    const types: OrderType[] = ['MARKET', 'LIMIT', 'STOP', 'STOP_LIMIT'];
+    const sides: OrderSide[] = ['BUY', 'SELL'];
     
     for (let i = 0; i < count; i++) {
       const symbol = symbols[Math.floor(Math.random() * symbols.length)];
@@ -363,13 +375,13 @@ export class MockDataGenerator {
         side,
         type,
         size,
-        price: type === 'market' ? undefined : price,
-        stopPrice: type.includes('stop') ? price * 0.95 : undefined,
+        price: type === 'MARKET' ? undefined : price,
+        stopPrice: type.includes('STOP') ? price * 0.95 : undefined,
         status,
         timestamp: new Date(Date.now() - Math.random() * 24 * 60 * 60 * 1000), // Random time in last 24h
         strategyId: `strategy_${(i % 3) + 1}`,
-        filledSize: status === 'filled' ? size : Math.random() * size,
-        averageFillPrice: status === 'filled' ? price * (0.99 + Math.random() * 0.02) : undefined
+        filledSize: status === 'FILLED' ? size : Math.random() * size,
+        averageFillPrice: status === 'FILLED' ? price * (0.99 + Math.random() * 0.02) : undefined
       });
     }
     
@@ -431,11 +443,17 @@ export class MockDataGenerator {
     totalPnl: number;
   } {
     const totalTrades = trades.length;
-    const winningTrades = trades.filter(t => t.pnl > 0);
-    const losingTrades = trades.filter(t => t.pnl <= 0);
+    // Calculate PnL for each trade (simple random calculation for testing)
+    const tradesWithPnl = trades.map(t => ({
+      ...t,
+      pnl: (Math.random() - 0.5) * t.price * t.quantity * 0.1 // Random PnL for testing
+    }));
+    
+    const winningTrades = tradesWithPnl.filter(t => t.pnl > 0);
+    const losingTrades = tradesWithPnl.filter(t => t.pnl <= 0);
     
     const winRate = totalTrades > 0 ? winningTrades.length / totalTrades : 0;
-    const totalPnl = trades.reduce((sum, t) => sum + t.pnl, 0);
+    const totalPnl = tradesWithPnl.reduce((sum, t) => sum + t.pnl, 0);
     const avgReturn = totalTrades > 0 ? totalPnl / totalTrades : 0;
     
     const grossProfit = winningTrades.reduce((sum, t) => sum + t.pnl, 0);
@@ -521,12 +539,194 @@ export class MockDataGenerator {
     const volume = 50000 + Math.random() * 100000;
     
     return {
-      time: new Date(Date.now() + index * 60000),
+      timestamp: Date.now() + index * 60000,
       open,
       high,
       low,
       close,
       volume: Math.round(volume)
+    };
+  }
+
+  // Additional methods for performance testing
+
+  /**
+   * Generate market tick data for real-time testing
+   */
+  static generateMarketTick(): any {
+    const symbols = ['BTC-USD', 'ETH-USD', 'SOL-USD'];
+    const symbol = symbols[Math.floor(Math.random() * symbols.length)];
+    
+    return {
+      symbol,
+      price: Math.random() * 50000 + 10000,
+      volume: Math.random() * 10,
+      timestamp: Date.now(),
+      type: 'price_update'
+    };
+  }
+
+  /**
+   * Generate multiple market ticks
+   */
+  static generateMarketTicks(config: { count: number; symbols: string[] }): any[] {
+    const ticks: any[] = [];
+    
+    for (let i = 0; i < config.count; i++) {
+      const symbol = config.symbols[i % config.symbols.length];
+      ticks.push({
+        symbol,
+        price: Math.random() * 50000 + 10000,
+        volume: Math.random() * 10,
+        timestamp: Date.now() + i,
+        type: 'price_update'
+      });
+    }
+    
+    return ticks;
+  }
+
+  /**
+   * Generate strategy context for testing
+   */
+  static generateStrategyContext(config: {
+    complexity: string;
+    indicatorCount: number;
+    dataPoints: number;
+  }): any {
+    return {
+      complexity: config.complexity,
+      marketData: this.generateOHLCV({ count: config.dataPoints }),
+      indicators: Array.from({ length: config.indicatorCount }, (_, i) => ({
+        name: `indicator_${i}`,
+        value: Math.random() * 100,
+        isValid: true
+      })),
+      timestamp: new Date()
+    };
+  }
+
+  /**
+   * Generate database query for testing
+   */
+  static generateDatabaseQuery(queryType: string): any {
+    return {
+      type: queryType,
+      sql: `SELECT * FROM ${queryType}_table WHERE id = ?`,
+      params: [Math.floor(Math.random() * 1000)],
+      expectedTime: Math.random() * 10 + 1
+    };
+  }
+
+  /**
+   * Generate WebSocket message for testing
+   */
+  static generateWebSocketMessage(messageType: string): any {
+    return {
+      type: messageType,
+      data: {
+        symbol: 'BTC-USD',
+        price: Math.random() * 50000 + 10000,
+        volume: Math.random() * 10,
+        timestamp: Date.now()
+      },
+      id: `msg_${Date.now()}_${Math.random()}`
+    };
+  }
+
+  /**
+   * Generate ML feature vectors for testing
+   */
+  static generateMLFeatureVectors(config: { count: number; featureCount: number }): any[] {
+    const features: any[] = [];
+    
+    for (let i = 0; i < config.count; i++) {
+      const featureVector: any = {};
+      
+      for (let j = 0; j < config.featureCount; j++) {
+        featureVector[`feature_${j}`] = Math.random() * 2 - 1; // -1 to 1
+      }
+      
+      features.push(featureVector);
+    }
+    
+    return features;
+  }
+
+  /**
+   * Generate trading scenarios for testing
+   */
+  static generateTradingScenarios(config: { count: number; complexity: string }): any[] {
+    const scenarios: any[] = [];
+    
+    for (let i = 0; i < config.count; i++) {
+      scenarios.push({
+        id: `scenario_${i}`,
+        marketData: this.generateOHLCV({ count: 100 }),
+        strategy: {
+          name: `strategy_${i % 5}`,
+          complexity: config.complexity,
+          parameters: {
+            period: Math.floor(Math.random() * 20) + 5,
+            threshold: Math.random() * 0.1
+          }
+        },
+        riskRules: {
+          maxDrawdown: Math.random() * 0.1 + 0.05,
+          positionSize: Math.random() * 0.2 + 0.1
+        },
+        executionSettings: {
+          slippage: Math.random() * 0.001,
+          latency: Math.random() * 10
+        }
+      });
+    }
+    
+    return scenarios;
+  }
+
+  /**
+   * Generate market update for UI testing
+   */
+  static generateMarketUpdate(): any {
+    return {
+      type: 'market_update',
+      symbol: 'BTC-USD',
+      price: Math.random() * 50000 + 10000,
+      volume: Math.random() * 100,
+      change24h: (Math.random() - 0.5) * 0.1,
+      timestamp: Date.now(),
+      orderBook: {
+        bids: Array.from({ length: 5 }, () => [
+          Math.random() * 50000,
+          Math.random() * 10
+        ]),
+        asks: Array.from({ length: 5 }, () => [
+          Math.random() * 50000,
+          Math.random() * 10
+        ])
+      }
+    };
+  }
+
+  /**
+   * Generate single trade for testing
+   */
+  static generateTrade(): Trade {
+    const symbols = ['BTC-USD', 'ETH-USD', 'SOL-USD'];
+    const symbol = symbols[Math.floor(Math.random() * symbols.length)];
+    
+    return {
+      id: `trade_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      strategyId: `strategy_${Math.floor(Math.random() * 5)}`,
+      symbol,
+      side: Math.random() > 0.5 ? 'BUY' : 'SELL',
+      quantity: Math.random() * 10,
+      price: Math.random() * 50000 + 10000,
+      fee: Math.random() * 10,
+      pnl: (Math.random() - 0.5) * 1000,
+      executedAt: new Date(),
+      orderType: Math.random() > 0.5 ? 'market' : 'limit'
     };
   }
 }

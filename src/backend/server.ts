@@ -2,11 +2,18 @@ import * as http from 'http';
 import { URL } from 'url';
 import { handleDydxRoute } from './routes/dydx';
 import { handleMLRoute } from './routes/ml';
+import { handleBacktestingRoute } from './routes/backtesting';
 import { getDatabaseManager } from './database/DatabaseManager';
+import MetricsManager from './monitoring/MetricsManager';
+import { metricsMiddleware, PeriodicMetricsCollector } from './monitoring/middleware';
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
 const PORT = Number(process.env.PORT || 3001);
+
+// Initialize metrics and monitoring
+const metricsManager = MetricsManager.getInstance();
+const periodicCollector = new PeriodicMetricsCollector();
 
 function setCors(res: http.ServerResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -35,6 +42,9 @@ const server = http.createServer(async (req, res) => {
       return notFound(res);
     }
 
+    // Apply metrics middleware to all requests
+    metricsMiddleware(req, res, () => {});
+
     // CORS preflight
     if (req.method === 'OPTIONS') {
       setCors(res);
@@ -55,6 +65,26 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Backtesting routes
+    if (await handleBacktestingRoute(req, res, url)) {
+      return;
+    }
+
+    // Prometheus metrics endpoint
+    if (pathname === '/api/metrics' || pathname === '/metrics') {
+      if (req.method !== 'GET') return methodNotAllowed(res);
+      
+      try {
+        const metrics = await metricsManager.getMetrics();
+        res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+        res.writeHead(200);
+        return res.end(metrics);
+      } catch (error) {
+        console.error('Error generating metrics:', error);
+        return sendJSON(res, 500, { error: 'Failed to generate metrics' });
+      }
+    }
+
     // Health check endpoint
     if (pathname === '/api/health') {
       if (req.method !== 'GET') return methodNotAllowed(res);
@@ -66,6 +96,15 @@ const server = http.createServer(async (req, res) => {
         try {
           // Get comprehensive database health status
           databaseHealth = await dbManager.getHealthStatus();
+          
+          // Update database metrics
+          const poolStatus = dbManager.getPoolStatus();
+          metricsManager.updateDbPoolMetrics(
+            poolStatus.totalConnections - poolStatus.idleConnections,
+            poolStatus.idleConnections,
+            poolStatus.totalConnections
+          );
+          
         } catch (dbError) {
           // Database not initialized or unavailable
           databaseHealth = {
@@ -92,6 +131,11 @@ const server = http.createServer(async (req, res) => {
           version: process.env.npm_package_version || 'dev',
           database: databaseHealth,
           connectionPool: poolStatus,
+          metrics: {
+            uptime: process.uptime(),
+            memory: process.memoryUsage(),
+            cpu: process.cpuUsage()
+          }
         });
       } catch (healthError) {
         // Fallback to basic health check if database manager fails
@@ -142,14 +186,34 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`[backend] listening on http://localhost:${PORT}`);
   console.log(`[backend] health check: http://localhost:${PORT}/api/health`);
+  console.log(`[backend] metrics endpoint: http://localhost:${PORT}/api/metrics`);
+  
+  // Initialize database connection
+  try {
+    console.log('[backend] initializing database...');
+    const dbManager = getDatabaseManager();
+    await dbManager.initialize();
+    console.log('[backend] database connection initialized');
+  } catch (error) {
+    console.error('[backend] database initialization failed:', error);
+    // Continue running without database for now
+  }
+  
+  // Start periodic metrics collection
+  periodicCollector.start(30000); // Collect metrics every 30 seconds
+  console.log('[backend] metrics collection started');
 });
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('\n[backend] shutting down...');
+  
+  // Stop metrics collection
+  periodicCollector.stop();
+  console.log('[backend] metrics collection stopped');
   
   // Close HTTP server
   server.close(async () => {

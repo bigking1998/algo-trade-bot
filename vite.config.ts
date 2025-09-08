@@ -35,5 +35,51 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
   },
-
+  
+  // Test configuration for Vitest
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    include: [
+      'src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}',
+      'src/test/**/__tests__/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'
+    ],
+    exclude: ['node_modules', 'dist'],
+    testTimeout: 60000, // 60 seconds for integration tests
+    hookTimeout: 30000, // 30 seconds for setup/teardown
+    teardownTimeout: 30000,
+    // Performance and memory settings for integration tests
+    maxConcurrency: 4,
+    pool: 'threads',
+    poolOptions: {
+      threads: {
+        maxThreads: 4,
+        minThreads: 1
+      }
+    },
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      reportsDirectory: './coverage',
+      exclude: [
+        'node_modules/',
+        'src/test/',
+        '**/*.d.ts',
+        '**/*.config.*',
+        '**/dist/',
+      ],
+      thresholds: {
+        lines: 85,
+        functions: 90,
+        branches: 80,
+        statements: 85
+      }
+    },
+    // Reporter configuration
+    reporter: ['verbose', 'json'],
+    outputFile: {
+      json: './test-results/results.json'
+    }
+  }
 })

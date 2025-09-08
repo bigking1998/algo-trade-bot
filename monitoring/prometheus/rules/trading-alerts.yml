@@ -1,0 +1,294 @@
+groups:
+  # ===========================================
+  # CRITICAL TRADING SYSTEM ALERTS
+  # ===========================================
+  - name: trading.critical
+    rules:
+      # Service Down Alerts
+      - alert: TradingBackendDown
+        expr: up{job="trading-bot-backend"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: backend
+          action: immediate
+        annotations:
+          summary: "Trading Bot Backend is down"
+          description: "The trading bot backend service has been down for more than 30 seconds. All trading operations are halted."
+          runbook_url: "https://internal-wiki/runbooks/trading-backend-down"
+
+      - alert: DatabaseConnectionLost
+        expr: trading_bot_db_connections_active == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+          action: immediate
+        annotations:
+          summary: "Database connection lost"
+          description: "Trading bot has lost all database connections. Trade persistence and historical data access unavailable."
+
+      - alert: ExchangeAPIFailure
+        expr: trading_bot_exchange_api_success_rate < 0.5
+        for: 2m
+        labels:
+          severity: critical
+          component: exchange
+          action: immediate
+        annotations:
+          summary: "Exchange API failure rate critical"
+          description: "Exchange API success rate is {{ $value | humanizePercentage }}, below 50% for 2 minutes. Trading may be severely impacted."
+
+      # Trading Performance Alerts
+      - alert: MajorDrawdown
+        expr: trading_bot_max_drawdown > 0.15
+        for: 5m
+        labels:
+          severity: critical
+          component: trading
+          action: immediate
+        annotations:
+          summary: "Major drawdown detected"
+          description: "Portfolio drawdown is {{ $value | humanizePercentage }}, exceeding 15% threshold. Risk management intervention required."
+
+      - alert: RapidLossesDetected
+        expr: increase(trading_bot_consecutive_losses[10m]) > 10
+        for: 1m
+        labels:
+          severity: critical
+          component: trading
+          action: immediate
+        annotations:
+          summary: "Rapid consecutive losses detected"
+          description: "More than 10 consecutive losses in the last 10 minutes. Trading strategy may be malfunctioning."
+
+  # ===========================================
+  # HIGH PRIORITY TRADING ALERTS
+  # ===========================================
+  - name: trading.high
+    rules:
+      # Performance Degradation
+      - alert: LowWinRate
+        expr: trading_bot_win_rate < 0.3
+        for: 30m
+        labels:
+          severity: high
+          component: trading
+          action: investigate
+        annotations:
+          summary: "Win rate below acceptable threshold"
+          description: "Trading win rate is {{ $value | humanizePercentage }}, below 30% for 30 minutes."
+
+      - alert: HighOrderLatency
+        expr: histogram_quantile(0.95, rate(trading_bot_order_latency_seconds_bucket[5m])) > 2
+        for: 10m
+        labels:
+          severity: high
+          component: trading
+          action: investigate
+        annotations:
+          summary: "High order execution latency"
+          description: "95th percentile order latency is {{ $value }}s, above 2 second threshold."
+
+      - alert: OrderFailureRateHigh
+        expr: rate(trading_bot_orders_failed_total[5m]) / rate(trading_bot_orders_total[5m]) > 0.1
+        for: 15m
+        labels:
+          severity: high
+          component: trading
+          action: investigate
+        annotations:
+          summary: "High order failure rate"
+          description: "Order failure rate is {{ $value | humanizePercentage }}, above 10% for 15 minutes."
+
+      - alert: SlippageExcessive
+        expr: trading_bot_slippage_percentage > 0.5
+        for: 20m
+        labels:
+          severity: high
+          component: trading
+          action: investigate
+        annotations:
+          summary: "Excessive trading slippage"
+          description: "Average slippage is {{ $value }}%, above 0.5% threshold for 20 minutes."
+
+  # ===========================================
+  # SYSTEM HEALTH ALERTS
+  # ===========================================
+  - name: system.health
+    rules:
+      # Resource Utilization
+      - alert: HighMemoryUsage
+        expr: (process_resident_memory_bytes{job="trading-bot-backend"} / 1024 / 1024) > 1000
+        for: 10m
+        labels:
+          severity: high
+          component: system
+          action: investigate
+        annotations:
+          summary: "High memory usage"
+          description: "Backend memory usage is {{ $value }}MB, above 1GB threshold."
+
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total{job="trading-bot-backend"}[5m]) > 0.8
+        for: 15m
+        labels:
+          severity: high
+          component: system
+          action: investigate
+        annotations:
+          summary: "High CPU usage"
+          description: "Backend CPU usage is {{ $value | humanizePercentage }}, above 80% for 15 minutes."
+
+      # Database Performance
+      - alert: DatabaseConnectionPoolExhausted
+        expr: trading_bot_db_connections_active / trading_bot_db_pool_size > 0.9
+        for: 5m
+        labels:
+          severity: high
+          component: database
+          action: investigate
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "{{ $value | humanizePercentage }} of database connections in use."
+
+      - alert: SlowDatabaseQueries
+        expr: histogram_quantile(0.95, rate(trading_bot_db_query_duration_seconds_bucket[5m])) > 1
+        for: 10m
+        labels:
+          severity: medium
+          component: database
+          action: investigate
+        annotations:
+          summary: "Slow database queries detected"
+          description: "95th percentile database query time is {{ $value }}s, above 1 second threshold."
+
+  # ===========================================
+  # ML MODEL PERFORMANCE ALERTS
+  # ===========================================
+  - name: ml.performance
+    rules:
+      - alert: MLModelAccuracyDegraded
+        expr: trading_bot_ml_model_accuracy < 0.6
+        for: 1h
+        labels:
+          severity: medium
+          component: ml
+          action: investigate
+        annotations:
+          summary: "ML model accuracy degraded"
+          description: "Model {{ $labels.model }} accuracy is {{ $value | humanizePercentage }}, below 60% threshold."
+
+      - alert: DataDriftDetected
+        expr: trading_bot_ml_data_drift_score > 0.7
+        for: 30m
+        labels:
+          severity: medium
+          component: ml
+          action: investigate
+        annotations:
+          summary: "Data drift detected in ML features"
+          description: "Data drift score for feature {{ $labels.feature }} is {{ $value }}, indicating model retraining may be needed."
+
+      - alert: MLInferenceLatencyHigh
+        expr: rate(trading_bot_ml_inference_duration_seconds_sum[5m]) / rate(trading_bot_ml_inference_duration_seconds_count[5m]) > 0.5
+        for: 15m
+        labels:
+          severity: medium
+          component: ml
+          action: investigate
+        annotations:
+          summary: "ML inference latency high"
+          description: "ML inference taking {{ $value }}s on average, above 0.5 second threshold."
+
+  # ===========================================
+  # BUSINESS LOGIC ALERTS
+  # ===========================================
+  - name: business.logic
+    rules:
+      # Risk Management
+      - alert: PositionSizeExcessive
+        expr: max by (symbol) (trading_bot_position_size) > 100000
+        for: 1m
+        labels:
+          severity: high
+          component: risk
+          action: immediate
+        annotations:
+          summary: "Excessive position size detected"
+          description: "Position size for {{ $labels.symbol }} is ${{ $value }}, above $100,000 limit."
+
+      - alert: DailyLossLimitApproaching
+        expr: trading_bot_daily_pnl < -5000
+        for: 1m
+        labels:
+          severity: high
+          component: risk
+          action: immediate
+        annotations:
+          summary: "Daily loss limit approaching"
+          description: "Daily P&L is ${{ $value }}, approaching -$5,000 daily loss limit."
+
+      # Market Data Quality
+      - alert: StaleMarketData
+        expr: (time() - trading_bot_last_market_data_timestamp) > 300
+        for: 2m
+        labels:
+          severity: high
+          component: data
+          action: investigate
+        annotations:
+          summary: "Stale market data detected"
+          description: "No market data updates for {{ $value }} seconds. Trading decisions may be based on outdated information."
+
+      - alert: WebSocketConnectionLost
+        expr: trading_bot_websocket_connections_active == 0
+        for: 1m
+        labels:
+          severity: high
+          component: data
+          action: investigate
+        annotations:
+          summary: "Real-time market data connection lost"
+          description: "WebSocket connections for real-time market data are down. Switching to polling fallback."
+
+  # ===========================================
+  # INFRASTRUCTURE ALERTS
+  # ===========================================
+  - name: infrastructure.alerts
+    rules:
+      # Rate Limiting
+      - alert: ExchangeRateLimitApproaching
+        expr: trading_bot_exchange_rate_limit_remaining < 100
+        for: 5m
+        labels:
+          severity: medium
+          component: exchange
+          action: throttle
+        annotations:
+          summary: "Exchange rate limit approaching"
+          description: "Only {{ $value }} API calls remaining before rate limit. Throttling may be required."
+
+      # Disk Space
+      - alert: LowDiskSpace
+        expr: (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) > 0.8
+        for: 10m
+        labels:
+          severity: high
+          component: system
+          action: cleanup
+        annotations:
+          summary: "Low disk space"
+          description: "Filesystem {{ $labels.mountpoint }} is {{ $value | humanizePercentage }} full."
+
+      # Network Connectivity
+      - alert: HighNetworkLatency
+        expr: trading_bot_network_latency_seconds > 0.1
+        for: 10m
+        labels:
+          severity: medium
+          component: network
+          action: investigate
+        annotations:
+          summary: "High network latency to exchange"
+          description: "Network latency to exchange is {{ $value }}s, above 100ms threshold."

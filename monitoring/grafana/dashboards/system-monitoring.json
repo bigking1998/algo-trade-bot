@@ -1,0 +1,210 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Trading Bot - System Monitoring",
+    "tags": ["system", "infrastructure", "monitoring"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Service Health Status",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 24, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "up{job=\"trading-bot-backend\"}",
+            "legendFormat": "Backend Service",
+            "refId": "A"
+          },
+          {
+            "expr": "up{job=\"postgresql\"}",
+            "legendFormat": "PostgreSQL",
+            "refId": "B"
+          },
+          {
+            "expr": "up{job=\"redis\"}",
+            "legendFormat": "Redis",
+            "refId": "C"
+          },
+          {
+            "expr": "up{job=\"nginx\"}",
+            "legendFormat": "Nginx",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "mappings": [
+              {"options": {"0": {"text": "DOWN", "color": "red"}}, "type": "value"},
+              {"options": {"1": {"text": "UP", "color": "green"}}, "type": "value"}
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "API Response Time",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=\"trading-bot-backend\"}[5m]))",
+            "legendFormat": "95th percentile",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job=\"trading-bot-backend\"}[5m]))",
+            "legendFormat": "50th percentile",
+            "refId": "B"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Request Rate",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{job=\"trading-bot-backend\"}[5m])",
+            "legendFormat": "{{method}} {{endpoint}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Database Connections",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+        "targets": [
+          {
+            "expr": "trading_bot_db_connections_active",
+            "legendFormat": "Active Connections",
+            "refId": "A"
+          },
+          {
+            "expr": "trading_bot_db_connections_idle",
+            "legendFormat": "Idle Connections",
+            "refId": "B"
+          },
+          {
+            "expr": "trading_bot_db_pool_size",
+            "legendFormat": "Pool Size",
+            "refId": "C"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Memory Usage",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+        "targets": [
+          {
+            "expr": "process_resident_memory_bytes{job=\"trading-bot-backend\"}",
+            "legendFormat": "Backend Memory",
+            "refId": "A"
+          },
+          {
+            "expr": "container_memory_usage_bytes{name=\"trading-bot-postgres-prod\"}",
+            "legendFormat": "PostgreSQL Memory",
+            "refId": "B"
+          },
+          {
+            "expr": "container_memory_usage_bytes{name=\"trading-bot-redis-prod\"}",
+            "legendFormat": "Redis Memory",
+            "refId": "C"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "CPU Usage",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 22},
+        "targets": [
+          {
+            "expr": "rate(process_cpu_seconds_total{job=\"trading-bot-backend\"}[5m]) * 100",
+            "legendFormat": "Backend CPU %",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(container_cpu_usage_seconds_total{name=\"trading-bot-postgres-prod\"}[5m]) * 100",
+            "legendFormat": "PostgreSQL CPU %",
+            "refId": "B"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Error Rate",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 22},
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{job=\"trading-bot-backend\",status=~\"5..\"}[5m])",
+            "legendFormat": "5xx Errors",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(http_requests_total{job=\"trading-bot-backend\",status=~\"4..\"}[5m])",
+            "legendFormat": "4xx Errors",
+            "refId": "B"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "WebSocket Connections",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 30},
+        "targets": [
+          {
+            "expr": "trading_bot_websocket_connections_active",
+            "legendFormat": "Active WS Connections",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(trading_bot_websocket_messages_total[5m])",
+            "legendFormat": "Messages/sec",
+            "refId": "B"
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Exchange API Health",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 30},
+        "targets": [
+          {
+            "expr": "trading_bot_exchange_api_success_rate",
+            "legendFormat": "API Success Rate %",
+            "refId": "A"
+          },
+          {
+            "expr": "trading_bot_exchange_rate_limit_remaining",
+            "legendFormat": "Rate Limit Remaining",
+            "refId": "B"
+          }
+        ]
+      }
+    ],
+    "time": {"from": "now-1h", "to": "now"},
+    "timepicker": {},
+    "templating": {"list": []},
+    "annotations": {"list": []},
+    "refresh": "5s",
+    "schemaVersion": 27,
+    "version": 1
+  }
+}

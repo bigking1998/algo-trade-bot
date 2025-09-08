@@ -1,0 +1,61 @@
+# Multi-stage build for React/Vite frontend
+FROM node:20-alpine AS base
+
+# Install dependencies only when needed
+FROM base AS deps
+# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+# Install dependencies based on the preferred package manager
+COPY package.json package-lock.json* ./
+RUN npm ci --only=production && npm cache clean --force
+
+# Rebuild the source code only when needed
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# Set build-time environment variables for production optimization
+ENV NODE_ENV=production
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL:-/api}
+
+# Build the application
+RUN npm run build
+
+# Production image, copy all the files and run nginx
+FROM nginx:alpine AS runner
+
+# Install necessary packages for health checks and SSL
+RUN apk add --no-cache curl openssl
+
+# Copy custom nginx configuration
+COPY docker/nginx.frontend.conf /etc/nginx/nginx.conf
+
+# Copy the built application from builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Add health check endpoint
+RUN echo '<!DOCTYPE html><html><head><title>Health Check</title></head><body><h1>OK</h1></body></html>' > /usr/share/nginx/html/health
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
+RUN chown -R nextjs:nodejs /usr/share/nginx/html
+RUN chown -R nextjs:nodejs /var/cache/nginx
+RUN chown -R nextjs:nodejs /var/log/nginx
+RUN chown -R nextjs:nodejs /etc/nginx/conf.d
+RUN touch /var/run/nginx.pid && chown -R nextjs:nodejs /var/run/nginx.pid
+
+USER nextjs
+
+# Expose port
+EXPOSE 80
+EXPOSE 443
+
+# Add health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost/health || exit 1
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]

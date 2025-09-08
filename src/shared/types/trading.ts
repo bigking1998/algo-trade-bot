@@ -176,25 +176,42 @@ export interface TradeHistoryResponse {
   pageSize: number;
 }
 
-// Position Management Types
+// Position Management Types (updated for BE-007 compatibility)
 export interface Position {
   id: string;
+  strategyId: string;
   symbol: string;
   side: 'long' | 'short';
-  quantity: number;
+  size: number; // Alias for quantity
+  quantity: number; // Legacy compatibility
   entryPrice: number;
   currentPrice: number;
+  
+  // P&L
   unrealizedPnL: number;
   unrealizedPnLPercent: number;
+  realizedPnL: number;
+  totalPnL: number;
+  pnlPercent: number;
   marketValue: number;
-  strategyId?: string;
-  openedAt: Date;
-  lastUpdatedAt: Date;
+  
+  // Risk management
   stopLoss?: number;
   takeProfit?: number;
+  trailingStop?: number;
   leverage?: number;
   margin?: number;
   liquidationPrice?: number;
+  
+  // Timing
+  openedAt: Date; // Legacy compatibility
+  entryTime: Date; // BE-007 standard
+  lastUpdatedAt: Date;
+  holdingPeriod: number; // milliseconds
+  
+  // Metadata
+  metadata: Record<string, unknown>;
+  status: 'open' | 'closing' | 'closed';
 }
 
 export interface PositionSummary {
@@ -243,4 +260,183 @@ export interface RiskMetrics {
   riskRewardRatio: number;
   maxDrawdown: number;
   sharpeRatio: number;
+}
+
+// Additional types needed by backend systems
+export type OrderType = 'MARKET' | 'LIMIT' | 'STOP' | 'STOP_LIMIT';
+export type OrderSide = 'BUY' | 'SELL' | 'LONG' | 'SHORT';
+export type OrderStatus = 'PENDING' | 'FILLED' | 'PARTIALLY_FILLED' | 'CANCELLED' | 'REJECTED';
+
+// OHLCV Data Structure
+export interface OHLCV {
+  timestamp: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  symbol?: string;
+  timeframe?: Timeframe;
+}
+
+// Portfolio State
+export interface PortfolioState {
+  totalValue: number;
+  availableBalance: number;
+  totalPnL: number;
+  totalPnLPercent: number;
+  positions: Position[];
+  orders: ActiveOrder[];
+  lastUpdated: Date;
+}
+
+// Trade Data Structure  
+export interface Trade {
+  id: string;
+  symbol: string;
+  side: OrderSide;
+  type: OrderType;
+  quantity: number;
+  price: number;
+  timestamp: Date;
+  strategyId?: string;
+  orderId?: string;
+  fees?: number;
+  commission?: number;
+}
+
+// Strategy Configuration
+export interface StrategyConfiguration {
+  id: string;
+  name: string;
+  type: StrategyType;
+  parameters: Record<string, any>;
+  riskConfig: RiskConfiguration;
+  executionConfig: ExecutionConfiguration;
+  monitoringConfig: MonitoringConfiguration;
+}
+
+export type StrategyType = 
+  | 'MOMENTUM' 
+  | 'MEAN_REVERSION' 
+  | 'BREAKOUT' 
+  | 'GRID_TRADING' 
+  | 'DCA' 
+  | 'ARBITRAGE'
+  | 'CUSTOM';
+
+// Risk Management Configuration
+export interface RiskConfiguration {
+  maxRiskPerTrade: number;
+  maxPortfolioRisk: number;
+  stopLossType: 'fixed' | 'trailing' | 'atr' | 'indicator';
+  takeProfitType: 'fixed' | 'trailing' | 'indicator' | 'ratio';
+  positionSizing: 'volatility' | 'fixed' | 'risk_parity';
+}
+
+// Execution Configuration
+export interface ExecutionConfiguration {
+  orderType: OrderType;
+  slippage: number;
+  timeout: number;
+  retries: number;
+}
+
+// Monitoring Configuration
+export interface MonitoringConfiguration {
+  enableAlerts: boolean;
+  alertChannels: string[];
+  healthCheckInterval: number;
+  performanceReviewInterval: number;
+}
+
+// Strategy Signal (updated for BE-007 compatibility)
+export interface StrategySignal {
+  id: string;
+  strategyId: string;
+  timestamp: Date;
+  type: 'BUY' | 'SELL' | 'HOLD' | 'CLOSE_LONG' | 'CLOSE_SHORT';
+  action: 'BUY' | 'SELL' | 'HOLD'; // Legacy compatibility field
+  symbol: string;
+  confidence: number; // 0-100 confidence score
+  strength: number; // Signal strength 0-1
+  
+  // Position sizing recommendations
+  quantity?: number;
+  percentage?: number; // Percentage of portfolio to allocate
+  
+  // Price levels
+  price: number; // Legacy field for compatibility
+  entryPrice?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  
+  // Risk management
+  maxRisk?: number; // Maximum risk percentage
+  timeframe: Timeframe;
+  
+  // Signal context and reasoning
+  reasoning?: string;
+  indicators?: Record<string, number>; // Technical indicator values
+  conditions?: string[]; // Conditions that triggered the signal
+  
+  // Metadata
+  metadata?: Record<string, unknown>;
+  source?: 'technical' | 'fundamental' | 'ml' | 'hybrid';
+  priority?: 'low' | 'medium' | 'high' | 'critical';
+  
+  // Expiry and validation
+  expiresAt?: Date;
+  isValid: boolean;
+}
+
+// Market Data Structure
+export interface MarketData {
+  symbol: string;
+  price: number;
+  timestamp: Date;
+  volume?: number;
+  high24h?: number;
+  low24h?: number;
+  change24h?: number;
+  change24hPercent?: number;
+}
+
+// Strategy Configuration (simplified version)
+export interface StrategyConfig {
+  id: string;
+  name: string;
+  type: string;
+  enabled: boolean;
+  parameters: Record<string, any>;
+}
+
+// Backtesting Types
+export interface BacktestResult {
+  id: string;
+  strategyId: string;
+  startDate: Date;
+  endDate: Date;
+  initialBalance: number;
+  finalBalance: number;
+  totalReturn: number;
+  totalReturnPercent: number;
+  maxDrawdown: number;
+  sharpeRatio: number;
+  trades: Trade[];
+  metrics: BacktestMetrics;
+}
+
+export interface BacktestMetrics {
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  profitFactor: number;
+  avgWinAmount: number;
+  avgLossAmount: number;
+  maxConsecutiveWins: number;
+  maxConsecutiveLosses: number;
+  volatility: number;
+  calmarRatio: number;
 }

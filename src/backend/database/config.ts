@@ -180,7 +180,9 @@ export function getConnectionString(config: DatabaseConfig): string {
   }
   
   if (ssl.rejectUnauthorized === false) {
-    params.push('sslrootcert=DISABLE');
+    params.push('sslcert=');
+    params.push('sslkey=');
+    params.push('sslrootcert=');
   }
   
   // Add application name for connection identification

@@ -1,0 +1,65 @@
+# Multi-stage build for Node.js backend
+FROM node:20-alpine AS base
+
+# Install dependencies only when needed
+FROM base AS deps
+RUN apk add --no-cache libc6-compat python3 make g++
+WORKDIR /app
+
+# Install dependencies based on package manager
+COPY package.json package-lock.json* ./
+RUN npm ci --only=production && npm cache clean --force
+
+# Development dependencies for building TypeScript
+FROM base AS dev-deps
+RUN apk add --no-cache libc6-compat python3 make g++
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+# Build the TypeScript source
+FROM dev-deps AS builder
+WORKDIR /app
+COPY . .
+
+# Build TypeScript to JavaScript
+RUN npm run build:backend
+
+# Production image
+FROM base AS runner
+WORKDIR /app
+
+# Install runtime dependencies only
+RUN apk add --no-cache \
+    dumb-init \
+    curl \
+    && addgroup --system --gid 1001 nodejs \
+    && adduser --system --uid 1001 nodejs
+
+# Copy production dependencies
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+
+# Copy necessary runtime files
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/database ./database
+
+# Create necessary directories and set permissions
+RUN mkdir -p /app/logs && \
+    chown -R nodejs:nodejs /app
+
+USER nodejs
+
+# Expose the backend port
+EXPOSE 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:3001/api/health || exit 1
+
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start the backend server
+CMD ["node", "dist/backend/server.js"]

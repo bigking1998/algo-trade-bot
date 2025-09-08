@@ -13,6 +13,8 @@ import MarketChart from "./components/charts/MarketChart";
 import StrategyBuilder from "./components/trading/StrategyBuilder";
 import RiskDashboard from "./components/risk/RiskDashboard";
 import { PositionManagement } from "./components/positions";
+import { ProfessionalTradingWorkspace } from "./components/trading/ProfessionalTradingWorkspace";
+import { InstitutionalDashboard } from "./components/institutional";
 
 // Hooks
 import { usePhantomWallet } from "@/frontend/hooks/usePhantomWallet";
@@ -25,7 +27,7 @@ const AutoTradingDashboard: React.FC<any> = () => (
 );
 
 const AdvancedTradingInterface: React.FC = () => (
-  <PositionManagement />
+  <ProfessionalTradingWorkspace />
 );
 
 const ActiveOrdersTab: React.FC = () => (
@@ -133,8 +135,10 @@ const TradingBotDashboard: React.FC = () => {
 
         {/* Main Tabs */}
         <Tabs defaultValue="auto-trading" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-7">
+          <TabsList className="grid w-full grid-cols-9">
             <TabsTrigger value="auto-trading">Auto Trading</TabsTrigger>
+            <TabsTrigger value="professional">Professional</TabsTrigger>
+            <TabsTrigger value="institutional">Institutional</TabsTrigger>
             <TabsTrigger value="positions">Positions</TabsTrigger>
             <TabsTrigger value="paper-trading">Paper Trading</TabsTrigger>
             <TabsTrigger value="portfolio">Portfolio</TabsTrigger>
@@ -147,6 +151,16 @@ const TradingBotDashboard: React.FC = () => {
           <TabsContent value="auto-trading" className="space-y-6">
             <KPICards />
             <AutoTradingDashboard {...wallet} />
+          </TabsContent>
+
+          {/* Professional Trading Tab */}
+          <TabsContent value="professional" className="h-full">
+            <ProfessionalTradingWorkspace />
+          </TabsContent>
+
+          {/* Institutional Dashboard Tab */}
+          <TabsContent value="institutional" className="h-full">
+            <InstitutionalDashboard />
           </TabsContent>
 
           {/* Positions Tab */}

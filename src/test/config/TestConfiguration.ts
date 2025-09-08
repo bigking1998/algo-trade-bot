@@ -24,6 +24,29 @@ export const TEST_CONFIG = {
     singleTestTimeout: 60000,       // Individual tests should complete within 60s
     integrationTestTimeout: 120000, // Integration tests can take up to 2 minutes
     e2eTestTimeout: 300000,         // E2E tests can take up to 5 minutes
+    
+    // Phase 2 Integration Testing Specific Benchmarks
+    phase2Integration: {
+      strategyEngineStartup: 2000,       // Strategy engine startup
+      signalProcessing: 50,              // Signal processing pipeline
+      orderExecution: 100,               // Order execution pipeline
+      riskAssessment: 25,                // Risk assessment calculations
+      portfolioUpdate: 30,               // Portfolio state updates
+      mlPrediction: 200,                 // ML model predictions
+      dataStreamProcessing: 10,          // Per data point processing
+      pipelineEndToEnd: 250,             // Complete pipeline flow
+      stressTesting: 60000,              // Stress test duration limit
+      performanceRegression: 1.2,        // 20% performance regression threshold
+    },
+    
+    // Throughput Targets
+    throughput: {
+      signalsPerSecond: 100,             // Signal processing throughput
+      ordersPerMinute: 1000,             // Order processing throughput
+      dataPointsPerSecond: 1000,         // Market data throughput
+      strategiesPerEngine: 20,           // Concurrent strategies per engine
+      maxConcurrentOrders: 500,          // Max concurrent order processing
+    }
   },
 
   // Coverage requirements
@@ -74,6 +97,44 @@ export const TEST_CONFIG = {
       enablePerformanceProfiling: process.env.ENABLE_PERF_PROFILING === 'true',
       parallelExecution: true,
       maxWorkers: 4,
+    },
+    
+    // Phase 2 Integration Testing Configuration
+    phase2Integration: {
+      // System Component Limits
+      maxConcurrentStrategies: 20,
+      maxSignalRate: 500,
+      maxOrderRate: 2000,
+      maxMemoryUsageMB: 1000,
+      
+      // Load Testing Parameters
+      loadTestDuration: 60000,           // 1 minute load tests
+      stressTestDuration: 300000,        // 5 minute stress tests
+      sustainedLoadDuration: 600000,     // 10 minute sustained load tests
+      
+      // Error Injection Parameters
+      networkLatencyMs: [10, 100, 1000],
+      errorRates: [0.01, 0.05, 0.1],
+      memoryPressureLevels: [0.7, 0.8, 0.9],
+      
+      // Recovery Testing
+      maxRecoveryTimeMs: 10000,
+      maxRetryAttempts: 5,
+      backoffMultiplier: 2,
+      
+      // Real-time Monitoring
+      metricsCollectionInterval: 1000,
+      healthCheckInterval: 5000,
+      performanceMonitoringEnabled: true,
+      
+      // Test Data Generation
+      marketDataGeneration: {
+        defaultVolatility: 0.02,
+        trendFactors: [-0.001, 0, 0.001],
+        volumeMultipliers: [0.5, 1.0, 2.0],
+        symbols: ['ETH-USD', 'BTC-USD', 'AVAX-USD', 'SOL-USD'],
+        timeframes: ['1m', '5m', '15m']
+      }
     }
   },
 

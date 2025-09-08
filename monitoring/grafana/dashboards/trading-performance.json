@@ -1,0 +1,160 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Trading Bot - Performance Dashboard",
+    "tags": ["trading", "performance", "algorithmic"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Trading Performance Overview",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "trading_bot_total_pnl",
+            "legendFormat": "Total P&L",
+            "refId": "A"
+          },
+          {
+            "expr": "trading_bot_win_rate",
+            "legendFormat": "Win Rate %",
+            "refId": "B"
+          },
+          {
+            "expr": "trading_bot_sharpe_ratio",
+            "legendFormat": "Sharpe Ratio",
+            "refId": "C"
+          },
+          {
+            "expr": "trading_bot_max_drawdown",
+            "legendFormat": "Max Drawdown %",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 0},
+                {"color": "green", "value": 0.1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Daily P&L Trend",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "trading_bot_daily_pnl",
+            "legendFormat": "Daily P&L",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {"legend": false, "tooltip": false, "vis": false},
+              "lineInterpolation": "linear",
+              "lineWidth": 1,
+              "pointSize": 5,
+              "scaleDistribution": {"type": "linear"},
+              "showPoints": "never",
+              "spanNulls": false,
+              "stacking": {"group": "A", "mode": "none"},
+              "thresholdsStyle": {"mode": "off"}
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Trade Volume & Count",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "rate(trading_bot_trades_total[5m])",
+            "legendFormat": "Trades per minute",
+            "refId": "A"
+          },
+          {
+            "expr": "trading_bot_volume_usd",
+            "legendFormat": "Volume USD",
+            "refId": "B"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Active Positions",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "trading_bot_position_size",
+            "legendFormat": "{{symbol}}",
+            "refId": "A",
+            "format": "table"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Strategy Performance",
+        "type": "bargauge",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "targets": [
+          {
+            "expr": "trading_bot_strategy_pnl",
+            "legendFormat": "{{strategy}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Order Execution Metrics",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 24, "x": 0, "y": 24},
+        "targets": [
+          {
+            "expr": "avg(trading_bot_order_latency_seconds)",
+            "legendFormat": "Avg Order Latency",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(trading_bot_orders_failed_total[5m])",
+            "legendFormat": "Failed Orders/min",
+            "refId": "B"
+          },
+          {
+            "expr": "trading_bot_slippage_percentage",
+            "legendFormat": "Avg Slippage %",
+            "refId": "C"
+          }
+        ]
+      }
+    ],
+    "time": {"from": "now-24h", "to": "now"},
+    "timepicker": {},
+    "templating": {"list": []},
+    "annotations": {"list": []},
+    "refresh": "10s",
+    "schemaVersion": 27,
+    "version": 1
+  }
+}

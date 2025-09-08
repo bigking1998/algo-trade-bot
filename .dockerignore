@@ -1,0 +1,93 @@
+# Docker ignore file for Trading Bot
+
+# Node modules
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files (will be handled separately)
+.env*
+!.env.template
+
+# Development files
+*.local
+*.development
+
+# Build output (will be built inside container)
+dist/
+build/
+dist-frontend/
+
+# Test files
+coverage/
+.nyc_output/
+test-results/
+*.test.js
+*.test.ts
+*.spec.js
+*.spec.ts
+__tests__/
+__mocks__/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-*
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+logs/
+*.log
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# Docker files (not needed inside container)
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Backup files
+backups/
+*.backup
+*.bak
+
+# Database files (will be in volumes)
+*.db
+*.sqlite
+*.sqlite3
+
+# Certificates and keys (will be mounted as volumes)
+ssl/
+certs/
+*.pem
+*.key
+*.crt
+*.p12
+
+# Monitoring and config files that should be mounted as volumes
+monitoring/
+nginx/
+
+# Scripts that run outside container
+scripts/deploy.sh
+scripts/backup.sh
+
+# Runtime files
+*.pid
+*.lock

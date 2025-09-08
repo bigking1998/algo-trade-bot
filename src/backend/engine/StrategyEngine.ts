@@ -424,7 +424,7 @@ export class StrategyEngine extends EventEmitter {
 
     try {
       // Stop strategy if running
-      if (executor.isRunning()) {
+      if (executor.isCurrentlyRunning()) {
         await executor.stop();
       }
       

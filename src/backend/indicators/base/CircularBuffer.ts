@@ -308,6 +308,22 @@ export class CircularBufferImpl<T> implements CircularBuffer<T> {
   }
 
   /**
+   * Remove and return the oldest value from the buffer
+   */
+  shift(): T | undefined {
+    if (this.count === 0) {
+      return undefined;
+    }
+    
+    const value = this.buffer[this.tail];
+    this.buffer[this.tail] = undefined;
+    this.tail = (this.tail + 1) % this.maxSize;
+    this.count--;
+    
+    return value;
+  }
+
+  /**
    * Convert buffer to string for debugging
    */
   toString(): string {

@@ -9,7 +9,7 @@
 import { MarketData } from '../types/database.js';
 import { DydxCandle } from '../../shared/types/trading.js';
 import { EventEmitter } from 'events';
-import { CircularBuffer } from '../indicators/base/CircularBuffer.js';
+import { CircularBufferImpl } from '../indicators/base/CircularBuffer.js';
 
 export interface BufferConfig {
   maxSize: number;
@@ -44,7 +44,7 @@ export interface BufferedDataPoint {
  * High-performance market data buffer with advanced streaming capabilities
  */
 export class MarketDataBuffer extends EventEmitter {
-  private buffers: Map<string, CircularBuffer<BufferedDataPoint>>; // symbol+timeframe -> buffer
+  private buffers: Map<string, CircularBufferImpl<BufferedDataPoint>>; // symbol+timeframe -> buffer
   private config: BufferConfig;
   private stats: BufferStats;
   private flushTimer: NodeJS.Timeout | null = null;
@@ -55,12 +55,13 @@ export class MarketDataBuffer extends EventEmitter {
   constructor(config: BufferConfig) {
     super();
     this.config = {
-      maxSize: 10000,
-      enableTimeOrdering: true,
-      enableDuplicateDetection: true,
-      flushThreshold: 0.8, // 80%
-      flushIntervalMs: 1000, // 1 second
-      ...config
+      maxSize: config.maxSize || 10000,
+      symbols: config.symbols || [],
+      timeframes: config.timeframes || [],
+      enableTimeOrdering: config.enableTimeOrdering ?? true,
+      enableDuplicateDetection: config.enableDuplicateDetection ?? true,
+      flushThreshold: config.flushThreshold ?? 0.8, // 80%
+      flushIntervalMs: config.flushIntervalMs ?? 1000, // 1 second
     };
     
     this.buffers = new Map();
@@ -138,7 +139,7 @@ export class MarketDataBuffer extends EventEmitter {
       // Get or create buffer for this symbol/timeframe
       let buffer = this.buffers.get(bufferKey);
       if (!buffer) {
-        buffer = new CircularBuffer<BufferedDataPoint>(this.config.maxSize);
+        buffer = new CircularBufferImpl<BufferedDataPoint>(this.config.maxSize);
         this.buffers.set(bufferKey, buffer);
       }
       
@@ -182,7 +183,7 @@ export class MarketDataBuffer extends EventEmitter {
   /**
    * Batch add multiple data points with optimized processing
    */
-  addBatch(candles: (DydxCandle | MarketData)[], source: 'websocket' | 'rest' | 'synthetic' = 'websocket'): number {
+  async addBatch(candles: (DydxCandle | MarketData)[], source: 'websocket' | 'rest' | 'synthetic' = 'websocket'): Promise<number> {
     const startTime = performance.now();
     let successCount = 0;
     
@@ -200,7 +201,7 @@ export class MarketDataBuffer extends EventEmitter {
         
         // Yield to event loop every chunk
         if (i + chunkSize < candles.length) {
-          await new Promise(resolve => setImmediate(resolve));
+          await new Promise<void>(resolve => setImmediate(resolve));
         }
       }
       
@@ -423,7 +424,7 @@ export class MarketDataBuffer extends EventEmitter {
     for (const symbol of this.config.symbols) {
       for (const timeframe of this.config.timeframes) {
         const bufferKey = this.getBufferKey(symbol, timeframe);
-        this.buffers.set(bufferKey, new CircularBuffer<BufferedDataPoint>(this.config.maxSize));
+        this.buffers.set(bufferKey, new CircularBufferImpl<BufferedDataPoint>(this.config.maxSize));
       }
     }
     
@@ -446,7 +447,7 @@ export class MarketDataBuffer extends EventEmitter {
     }, this.config.flushIntervalMs);
   }
 
-  private flushBuffer(buffer: CircularBuffer<BufferedDataPoint>): MarketData[] {
+  private flushBuffer(buffer: CircularBufferImpl<BufferedDataPoint>): MarketData[] {
     const data: MarketData[] = [];
     
     while (buffer.size() > 0) {

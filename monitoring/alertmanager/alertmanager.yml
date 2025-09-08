@@ -1,0 +1,245 @@
+global:
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'alerts@tradingbot.local'
+  smtp_auth_username: '${SMTP_USERNAME}'
+  smtp_auth_password: '${SMTP_PASSWORD}'
+  smtp_require_tls: true
+  
+  # Slack webhook configuration
+  slack_api_url: '${SLACK_WEBHOOK_URL}'
+  
+  # Resolve timeout - how long to wait before sending a resolved notification
+  resolve_timeout: 5m
+
+# Templates for custom notification formatting
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Route tree for alert distribution
+route:
+  # Default route configuration
+  group_by: ['alertname', 'component', 'severity']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 4h
+  receiver: 'default-alerts'
+  
+  # Specific routing rules
+  routes:
+    # Critical alerts - immediate notification via multiple channels
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 0s
+      repeat_interval: 15m
+      continue: true
+      
+    # High severity alerts - Slack + Email
+    - match:
+        severity: high
+      receiver: 'high-priority-alerts'
+      group_wait: 30s
+      repeat_interval: 1h
+      continue: true
+      
+    # Trading specific alerts
+    - match:
+        component: trading
+      receiver: 'trading-team-alerts'
+      group_wait: 20s
+      repeat_interval: 30m
+      continue: true
+      
+    # ML model alerts
+    - match:
+        component: ml
+      receiver: 'ml-team-alerts'
+      group_wait: 1m
+      repeat_interval: 2h
+      continue: true
+      
+    # Business hours only alerts
+    - match:
+        action: business-hours-only
+      receiver: 'business-hours-alerts'
+      active_time_intervals:
+        - business-hours
+      
+    # Maintenance window silence
+    - match:
+        component: system
+      receiver: 'maintenance-alerts'
+      active_time_intervals:
+        - maintenance-window
+
+# Inhibition rules - suppress certain alerts when others fire
+inhibit_rules:
+  # Suppress non-critical alerts when service is down
+  - source_matchers:
+      - alertname = "TradingBackendDown"
+    target_matchers:
+      - component = "trading"
+    equal: ['job', 'instance']
+    
+  # Suppress order-related alerts when exchange API is failing
+  - source_matchers:
+      - alertname = "ExchangeAPIFailure"
+    target_matchers:
+      - alertname =~ "Order.*"
+    equal: ['exchange']
+
+# Time intervals for scheduled notifications
+time_intervals:
+  - name: business-hours
+    time_intervals:
+      - times:
+          - start_time: '09:00'
+            end_time: '17:00'
+        weekdays: ['monday:friday']
+        
+  - name: maintenance-window
+    time_intervals:
+      - times:
+          - start_time: '02:00'
+            end_time: '04:00'
+        weekdays: ['sunday']
+
+# Receiver definitions
+receivers:
+  # Default receiver for general alerts
+  - name: 'default-alerts'
+    email_configs:
+      - to: '${ALERT_EMAIL_TO}'
+        subject: '[TRADING-BOT] {{ .Status | toUpper }}: {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Component: {{ .Labels.component }}
+          {{ if .Labels.runbook_url }}Runbook: {{ .Labels.runbook_url }}{{ end }}
+          {{ end }}
+
+  # Critical alerts - PagerDuty, Slack, Email, Webhook
+  - name: 'critical-alerts'
+    # PagerDuty integration
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_ROUTING_KEY}'
+        severity: 'critical'
+        client: 'Trading Bot Alert Manager'
+        client_url: 'https://grafana.tradingbot.local'
+        details:
+          summary: '{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.summary }}'
+          component: '{{ .GroupLabels.component }}'
+          severity: '{{ .GroupLabels.severity }}'
+    
+    # Slack for immediate visibility
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#trading-critical'
+        title: '🚨 CRITICAL ALERT: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity | toUpper }}
+          *Component:* {{ .Labels.component }}
+          *Action Required:* {{ .Labels.action }}
+          {{ if .Labels.runbook_url }}*Runbook:* <{{ .Labels.runbook_url }}|View Runbook>{{ end }}
+          {{ end }}
+        color: 'danger'
+        send_resolved: true
+        
+    # Email for detailed information
+    email_configs:
+      - to: '${CRITICAL_ALERT_EMAIL}'
+        subject: '🚨 CRITICAL: {{ .GroupLabels.alertname }} - Immediate Action Required'
+        body: |
+          CRITICAL ALERT NOTIFICATION
+          ===========================
+          
+          {{ range .Alerts }}
+          Alert Name: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity | toUpper }}
+          Component: {{ .Labels.component }}
+          Action Required: {{ .Labels.action }}
+          Started: {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
+          {{ if .Labels.runbook_url }}
+          Runbook: {{ .Labels.runbook_url }}
+          {{ end }}
+          
+          Grafana Dashboard: https://grafana.tradingbot.local
+          Prometheus Alerts: https://prometheus.tradingbot.local/alerts
+          {{ end }}
+          
+    # Webhook for automation systems
+    webhook_configs:
+      - url: '${CRITICAL_WEBHOOK_URL}'
+        send_resolved: true
+        http_config:
+          bearer_token: '${WEBHOOK_AUTH_TOKEN}'
+
+  # High priority alerts - Slack + Email
+  - name: 'high-priority-alerts'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#trading-alerts'
+        title: '⚠️ High Priority: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Component:* {{ .Labels.component }}
+          *Action:* {{ .Labels.action }}
+          {{ end }}
+        color: 'warning'
+        send_resolved: true
+        
+    email_configs:
+      - to: '${ALERT_EMAIL_TO}'
+        subject: '[HIGH] {{ .GroupLabels.alertname }} - {{ .GroupLabels.component }}'
+
+  # Trading team specific alerts
+  - name: 'trading-team-alerts'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#trading-team'
+        title: '📈 Trading Alert: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Trading Issue:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ if .Labels.strategy }}*Strategy:* {{ .Labels.strategy }}{{ end }}
+          {{ if .Labels.symbol }}*Symbol:* {{ .Labels.symbol }}{{ end }}
+          {{ end }}
+        color: '#FF9500'
+        
+    email_configs:
+      - to: '${TRADING_TEAM_EMAIL}'
+        subject: '[TRADING] {{ .GroupLabels.alertname }}'
+
+  # ML team alerts
+  - name: 'ml-team-alerts'
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#ml-monitoring'
+        title: '🤖 ML Alert: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Model Issue:* {{ .Annotations.summary }}
+          {{ if .Labels.model }}*Model:* {{ .Labels.model }}{{ end }}
+          {{ if .Labels.accuracy }}*Accuracy:* {{ .Labels.accuracy }}{{ end }}
+          {{ end }}
+        color: '#36A64F'
+
+  # Business hours alerts
+  - name: 'business-hours-alerts'
+    email_configs:
+      - to: '${BUSINESS_HOURS_EMAIL}'
+        subject: '[BUSINESS-HOURS] {{ .GroupLabels.alertname }}'
+        
+  # Maintenance alerts (lower priority)
+  - name: 'maintenance-alerts'
+    email_configs:
+      - to: '${MAINTENANCE_EMAIL}'
+        subject: '[MAINTENANCE] {{ .GroupLabels.alertname }}'
