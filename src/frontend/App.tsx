@@ -2,8 +2,8 @@
 
 import React, { useState } from "react";
 import { Moon, Sun, BarChart3 } from "lucide-react";
-import { Button } from "components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "components/ui/tabs";
+import { Button } from "./components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 
 // Extracted Components
 import KPICards from "./components/dashboard/KPICards";

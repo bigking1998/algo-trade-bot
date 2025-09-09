@@ -13,10 +13,10 @@ import {
   StrategyConfiguration, 
   StrategyType,
   Position,
-  Order,
   OrderType,
   OrderSide,
-  OrderStatus
+  OrderStatus,
+  ActiveOrder
 } from '@/shared/types/trading';
 
 /**
@@ -105,7 +105,7 @@ export class MockDataGenerator {
       const volume = baseVolume * (1 + (Math.random() - 0.5) * volumeVariation);
       
       data.push({
-        time: new Date(startTime.getTime() + i * intervalMs),
+        timestamp: startTime.getTime() + i * intervalMs,
         open: open,
         high: validHigh,
         low: validLow,
@@ -166,16 +166,31 @@ export class MockDataGenerator {
       const side = Math.random() > 0.5 ? 'long' : 'short';
       const unrealizedPnl = (Math.random() - 0.5) * positionValue * 0.1; // ±10% unrealized P&L
       
+      const currentPrice = price + (Math.random() - 0.5) * price * 0.05;
+      const unrealizedPnL = (currentPrice - price) * size;
+      const now = new Date();
+      
       return {
         id: `pos_${index + 1}`,
+        strategyId: `strategy_${index % 3 + 1}`,
         symbol,
         side,
         size,
+        quantity: size, // Legacy compatibility
         entryPrice: price,
-        currentPrice: price + (Math.random() - 0.5) * price * 0.05,
-        unrealizedPnl,
-        timestamp: new Date(),
-        strategyId: `strategy_${index % 3 + 1}`
+        currentPrice,
+        unrealizedPnL,
+        unrealizedPnLPercent: (unrealizedPnL / (price * size)) * 100,
+        realizedPnL: 0,
+        totalPnL: unrealizedPnL,
+        pnlPercent: (unrealizedPnL / (price * size)) * 100,
+        marketValue: currentPrice * size,
+        openedAt: now, // Legacy compatibility
+        entryTime: now, // BE-007 standard
+        lastUpdatedAt: now,
+        holdingPeriod: 0,
+        metadata: {},
+        status: 'open' as const
       };
     });
 
@@ -276,7 +291,7 @@ export class MockDataGenerator {
     };
 
     switch (type) {
-      case 'trend_following':
+      case 'MOMENTUM':
         return {
           ...baseConfig,
           type: 'MOMENTUM' as StrategyType,
@@ -290,7 +305,7 @@ export class MockDataGenerator {
           }
         };
 
-      case 'mean_reversion':
+      case 'MEAN_REVERSION':
         return {
           ...baseConfig,
           type: 'MEAN_REVERSION' as StrategyType,
@@ -305,7 +320,7 @@ export class MockDataGenerator {
           }
         };
 
-      case 'momentum':
+      case 'BREAKOUT':
         return {
           ...baseConfig,
           type: 'MOMENTUM' as StrategyType,
@@ -319,7 +334,7 @@ export class MockDataGenerator {
           }
         };
 
-      case 'arbitrage':
+      case 'ARBITRAGE':
         return {
           ...baseConfig,
           type: 'ARBITRAGE' as StrategyType,
@@ -353,11 +368,11 @@ export class MockDataGenerator {
   /**
    * Generate orders for testing
    */
-  static generateOrders(
+  static generateActiveOrders(
     count: number, 
     symbols: string[] = this.DEFAULT_SYMBOLS.slice(0, 5)
-  ): Order[] {
-    const orders: Order[] = [];
+  ): ActiveOrder[] {
+    const orders: ActiveOrder[] = [];
     const statuses: OrderStatus[] = ['PENDING', 'FILLED', 'CANCELLED', 'REJECTED'];
     const types: OrderType[] = ['MARKET', 'LIMIT', 'STOP', 'STOP_LIMIT'];
     const sides: OrderSide[] = ['BUY', 'SELL'];

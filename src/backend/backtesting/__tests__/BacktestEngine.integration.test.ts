@@ -145,7 +145,10 @@ describe('BacktestEngine Integration Tests', () => {
         alertChannels: [],
         healthCheckInterval: 60,
         performanceReviewInterval: 3600
-      }
+      },
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
     });
   });
 
@@ -436,7 +439,10 @@ describe('BacktestEngine Error Handling', () => {
         alertChannels: [],
         healthCheckInterval: 60,
         performanceReviewInterval: 3600
-      }
+      },
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
     });
 
     const invalidConfigs = [
