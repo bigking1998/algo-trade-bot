@@ -15,8 +15,8 @@
 import { DatabaseSetup, getDefaultDatabaseConfig, DatabaseConfig } from '../src/backend/database/DatabaseSetup.js';
 import { config } from 'dotenv';
 
-// Load environment variables
-config();
+// Load environment variables from .env.database file
+config({ path: '.env.database' });
 
 interface SetupOptions {
   skipBackup?: boolean;

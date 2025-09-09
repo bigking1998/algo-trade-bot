@@ -13,9 +13,6 @@ import {
   StrategyConfiguration, 
   StrategyType,
   Position,
-  OrderType,
-  OrderSide,
-  OrderStatus,
   ActiveOrder
 } from '@/shared/types/trading';
 
@@ -236,7 +233,7 @@ export class MockDataGenerator {
         (1 - avgReturn - Math.random() * avgReturn);
       
       const exitPrice = entryPrice * returnMultiplier;
-      const pnl = (exitPrice - entryPrice) * size * (side === 'sell' ? -1 : 1);
+      const pnl = (exitPrice - entryPrice) * size * (side === 'SELL' ? -1 : 1);
       
       const entryTime = new Date(startDate.getTime() + (timeSpan * i) / count);
       const exitTime = new Date(entryTime.getTime() + Math.random() * 3600000); // Exit within 1 hour
@@ -244,7 +241,7 @@ export class MockDataGenerator {
       trades.push({
         id: `trade_${i + 1}`,
         symbol,
-        side: side === 'sell' ? 'SELL' : 'BUY',
+        side: side,
         type: 'MARKET',
         quantity: size,
         price: entryPrice,
@@ -373,9 +370,9 @@ export class MockDataGenerator {
     symbols: string[] = this.DEFAULT_SYMBOLS.slice(0, 5)
   ): ActiveOrder[] {
     const orders: ActiveOrder[] = [];
-    const statuses: OrderStatus[] = ['PENDING', 'FILLED', 'CANCELLED', 'REJECTED'];
-    const types: OrderType[] = ['MARKET', 'LIMIT', 'STOP', 'STOP_LIMIT'];
-    const sides: OrderSide[] = ['BUY', 'SELL'];
+    const statuses = ['PENDING', 'PARTIAL_FILLED', 'FILLED', 'CANCELLED'] as const;
+    const types = ['MARKET', 'LIMIT', 'STOP_LOSS', 'TAKE_PROFIT', 'STOP_LIMIT'] as const;
+    const sides = ['BUY', 'SELL'] as const;
     
     for (let i = 0; i < count; i++) {
       const symbol = symbols[Math.floor(Math.random() * symbols.length)];
@@ -384,25 +381,28 @@ export class MockDataGenerator {
       const status = statuses[Math.floor(Math.random() * statuses.length)];
       
       const price = 50 + Math.random() * 950;
-      const size = 0.1 + Math.random() * 9.9;
+      const quantity = 0.1 + Math.random() * 9.9;
+      const filledQuantity = status === 'FILLED' ? quantity : Math.random() * quantity;
       
       orders.push({
         id: `order_${i + 1}`,
         symbol,
         side,
         type,
-        size,
+        quantity,
         price: type === 'MARKET' ? undefined : price,
         stopPrice: type.includes('STOP') ? price * 0.95 : undefined,
+        filledQuantity,
+        remainingQuantity: quantity - filledQuantity,
         status,
-        timestamp: new Date(Date.now() - Math.random() * 24 * 60 * 60 * 1000), // Random time in last 24h
-        strategyId: `strategy_${(i % 3) + 1}`,
-        filledSize: status === 'FILLED' ? size : Math.random() * size,
-        averageFillPrice: status === 'FILLED' ? price * (0.99 + Math.random() * 0.02) : undefined
+        timeInForce: 'GTC' as const,
+        createdAt: Date.now() - Math.random() * 24 * 60 * 60 * 1000, // Random time in last 24h
+        updatedAt: Date.now() - Math.random() * 12 * 60 * 60 * 1000, // Updated within last 12h
+        reduceOnly: Math.random() > 0.8
       });
     }
     
-    return orders.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    return orders.sort((a, b) => b.createdAt - a.createdAt);
   }
 
   /**

@@ -496,6 +496,57 @@ export class TradeRepository extends BaseRepository<Trade> {
   }
 
   /**
+   * Find strategy by name (for migration use)
+   */
+  public async findStrategyByName(strategyName: string): Promise<{id: string; name: string} | null> {
+    try {
+      const result = await this.query<{id: string; name: string}>(
+        'SELECT id, name FROM strategies WHERE name = $1 LIMIT 1',
+        [strategyName]
+      );
+      return result.rows[0] || null;
+    } catch (error) {
+      console.warn(`[TradeRepository] Failed to find strategy by name: ${strategyName}`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Get symbol statistics for analytics
+   */
+  public async getSymbolStats(): Promise<Array<{symbol: string; count: number}>> {
+    try {
+      const result = await this.query<{symbol: string; count: number}>(
+        'SELECT symbol, COUNT(*) as count FROM trades GROUP BY symbol ORDER BY count DESC'
+      );
+      return result.rows;
+    } catch (error) {
+      console.error('[TradeRepository] Failed to get symbol stats:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get strategy statistics for analytics
+   */
+  public async getStrategyStats(): Promise<Array<{strategy: string; count: number}>> {
+    try {
+      const result = await this.query<{strategy: string; count: number}>(
+        `SELECT s.name as strategy, COUNT(*) as count 
+         FROM trades t 
+         LEFT JOIN strategies s ON t.strategy_id = s.id 
+         GROUP BY s.name 
+         ORDER BY count DESC`
+      );
+      return result.rows;
+    } catch (error) {
+      console.error('[TradeRepository] Failed to get strategy stats:', error);
+      return [];
+    }
+  }
+
+
+  /**
    * Get comprehensive trade analytics
    */
   public async getTradeAnalytics(

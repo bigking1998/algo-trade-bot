@@ -225,6 +225,10 @@ class SystemStressTestOrchestrator {
     this.setupEventMonitoring();
   }
   
+  get testComponents() {
+    return this.components;
+  }
+  
   private setupEventMonitoring(): void {
     // Monitor system events for stress test metrics
     this.components.strategyEngine.on('signal', () => {
@@ -607,7 +611,7 @@ describe('System Stress Testing Suite', () => {
         
         const batchResults = await Promise.allSettled(
           batch.map(order => 
-            stressOrchestrator.components.orderManager.createOrder(order)
+            stressOrchestrator.testComponents.orderManager.createOrder(order)
           )
         );
         
@@ -685,7 +689,7 @@ describe('System Stress Testing Suite', () => {
         
         const results = await Promise.allSettled(
           orders.map(order => 
-            stressOrchestrator.components.orderManager.createOrder(order)
+            stressOrchestrator.testComponents.orderManager.createOrder(order)
           )
         );
         
@@ -704,11 +708,11 @@ describe('System Stress Testing Suite', () => {
   describe('System Resilience and Failover', () => {
     test('should maintain operation during component failures', async () => {
       // Simulate strategy engine failure
-      const originalProcessData = stressOrchestrator.components.strategyEngine.processMarketData;
+      const originalProcessData = stressOrchestrator.testComponents.strategyEngine.processMarketData;
       let failureInjected = false;
       
       // Inject intermittent failures
-      stressOrchestrator.components.strategyEngine.processMarketData = async function(data: OHLCV) {
+      stressOrchestrator.testComponents.strategyEngine.processMarketData = async function(data: OHLCV) {
         if (!failureInjected && Math.random() < 0.3) {
           failureInjected = true;
           throw new Error('Simulated strategy engine failure');
@@ -737,7 +741,7 @@ describe('System Stress Testing Suite', () => {
           
       } finally {
         // Restore original function
-        stressOrchestrator.components.strategyEngine.processMarketData = originalProcessData;
+        stressOrchestrator.testComponents.strategyEngine.processMarketData = originalProcessData;
       }
     });
     
@@ -746,8 +750,8 @@ describe('System Stress Testing Suite', () => {
       const originalFunctions: any = {};
       
       // Inject order manager failures
-      originalFunctions.createOrder = stressOrchestrator.components.orderManager.createOrder;
-      stressOrchestrator.components.orderManager.createOrder = async function(request: any) {
+      originalFunctions.createOrder = stressOrchestrator.testComponents.orderManager.createOrder;
+      stressOrchestrator.testComponents.orderManager.createOrder = async function(request: any) {
         if (Math.random() < 0.2) {
           throw new Error('Order manager failure');
         }
@@ -755,8 +759,8 @@ describe('System Stress Testing Suite', () => {
       };
       
       // Inject risk engine failures  
-      originalFunctions.assessRisk = stressOrchestrator.components.riskEngine.assessPortfolioRisk;
-      stressOrchestrator.components.riskEngine.assessPortfolioRisk = async function(portfolio: any) {
+      originalFunctions.assessRisk = stressOrchestrator.testComponents.riskEngine.assessPortfolioRisk;
+      stressOrchestrator.testComponents.riskEngine.assessPortfolioRisk = async function(portfolio: any) {
         if (Math.random() < 0.15) {
           throw new Error('Risk engine failure');
         }
@@ -784,8 +788,8 @@ describe('System Stress Testing Suite', () => {
           
       } finally {
         // Restore original functions
-        stressOrchestrator.components.orderManager.createOrder = originalFunctions.createOrder;
-        stressOrchestrator.components.riskEngine.assessPortfolioRisk = originalFunctions.assessRisk;
+        stressOrchestrator.testComponents.orderManager.createOrder = originalFunctions.createOrder;
+        stressOrchestrator.testComponents.riskEngine.assessPortfolioRisk = originalFunctions.assessRisk;
       }
     });
   });

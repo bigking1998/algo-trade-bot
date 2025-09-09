@@ -160,12 +160,14 @@ describe('TradeRepository', () => {
       
       // Mock transaction callback
       mockTransaction.mockImplementation(async (callback: any) => {
+        const mockClient = {
+          query: vi.fn()
+            .mockResolvedValueOnce({ rows: [mockTrade] }) // First query: get trade
+            .mockResolvedValueOnce({ rows: [{ ...mockTrade, pnl: expectedPnL, exit_time: new Date() }] }), // Second query: update trade
+        };
+        
         const mockContext = {
-          client: {
-            query: vi.fn()
-              .mockResolvedValueOnce({ rows: [mockTrade] }) // First query: get trade
-              .mockResolvedValueOnce({ rows: [{ ...mockTrade, pnl: expectedPnL, exit_time: new Date() }] }), // Second query: update trade
-          },
+          client: mockClient,
         };
         
         return await callback(mockContext);
@@ -188,20 +190,22 @@ describe('TradeRepository', () => {
       const expectedPnL = (exitPrice - mockTrade.executed_price!) * exitQuantity - 25; // proportional fees
       
       mockTransaction.mockImplementation(async (callback: any) => {
+        const mockClient = {
+          query: vi.fn()
+            .mockResolvedValueOnce({ rows: [mockTrade] })
+            .mockResolvedValueOnce({ 
+              rows: [{ 
+                ...mockTrade, 
+                pnl: expectedPnL, 
+                executed_quantity: exitQuantity,
+                remaining_quantity: 0.5,
+                status: 'partial'
+              }] 
+            }),
+        };
+        
         const mockContext = {
-          client: {
-            query: vi.fn()
-              .mockResolvedValueOnce({ rows: [mockTrade] })
-              .mockResolvedValueOnce({ 
-                rows: [{ 
-                  ...mockTrade, 
-                  pnl: expectedPnL, 
-                  executed_quantity: exitQuantity,
-                  remaining_quantity: 0.5,
-                  status: 'partial'
-                }] 
-              }),
-          },
+          client: mockClient,
         };
         
         return await callback(mockContext);
@@ -221,10 +225,12 @@ describe('TradeRepository', () => {
       const closedTrade = { ...mockTrade, exit_time: new Date() };
       
       mockTransaction.mockImplementation(async (callback: any) => {
+        const mockClient = {
+          query: vi.fn().mockResolvedValueOnce({ rows: [closedTrade] }),
+        };
+        
         const mockContext = {
-          client: {
-            query: vi.fn().mockResolvedValueOnce({ rows: [closedTrade] }),
-          },
+          client: mockClient,
         };
         
         return await callback(mockContext);
@@ -242,12 +248,14 @@ describe('TradeRepository', () => {
       const expectedPnL = (shortTrade.executed_price - exitPrice) * shortTrade.executed_quantity - 50; // Short P&L calculation
       
       mockTransaction.mockImplementation(async (callback: any) => {
+        const mockClient = {
+          query: vi.fn()
+            .mockResolvedValueOnce({ rows: [shortTrade] })
+            .mockResolvedValueOnce({ rows: [{ ...shortTrade, pnl: expectedPnL }] }),
+        };
+        
         const mockContext = {
-          client: {
-            query: vi.fn()
-              .mockResolvedValueOnce({ rows: [shortTrade] })
-              .mockResolvedValueOnce({ rows: [{ ...shortTrade, pnl: expectedPnL }] }),
-          },
+          client: mockClient,
         };
         
         return await callback(mockContext);
@@ -639,12 +647,14 @@ describe('TradeRepository', () => {
 
     it('should invalidate caches after trade closure', async () => {
       mockTransaction.mockImplementation(async (callback: any) => {
+        const mockClient = {
+          query: vi.fn()
+            .mockResolvedValueOnce({ rows: [mockTrade] })
+            .mockResolvedValueOnce({ rows: [{ ...mockTrade, exit_time: new Date() }] }),
+        };
+        
         const mockContext = {
-          client: {
-            query: vi.fn()
-              .mockResolvedValueOnce({ rows: [mockTrade] })
-              .mockResolvedValueOnce({ rows: [{ ...mockTrade, exit_time: new Date() }] }),
-          },
+          client: mockClient,
         };
         
         return await callback(mockContext);
@@ -686,10 +696,12 @@ describe('TradeRepository', () => {
 
     it('should validate trade existence before closure', async () => {
       mockTransaction.mockImplementation(async (callback: any) => {
+        const mockClient = {
+          query: vi.fn().mockResolvedValueOnce({ rows: [] }), // No trade found
+        };
+        
         const mockContext = {
-          client: {
-            query: vi.fn().mockResolvedValueOnce({ rows: [] }), // No trade found
-          },
+          client: mockClient,
         };
         
         return await callback(mockContext);

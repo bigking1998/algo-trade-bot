@@ -19,7 +19,7 @@ export interface Strategy {
   is_deleted: boolean;
 }
 
-export interface MarketData {
+export interface MarketData extends BaseEntity {
   time: Date;
   symbol: string;
   exchange: string;
@@ -32,7 +32,41 @@ export interface MarketData {
   trades_count?: number;
   timeframe: '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
   raw_data?: Record<string, unknown>;
-  created_at: Date;
+}
+
+// Market data specific interfaces for time-series optimization
+export interface MarketDataFilters {
+  symbol?: string;
+  symbols?: string[];
+  timeframe?: MarketData['timeframe'];
+  timeframes?: MarketData['timeframe'][];
+  start_time?: Date;
+  end_time?: Date;
+  min_volume?: number;
+  max_volume?: number;
+  min_price?: number;
+  max_price?: number;
+  source?: string;
+}
+
+export interface MarketDataAggregation {
+  period: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  vwap: number;
+  trades_count: number;
+  timeframe: MarketData['timeframe'];
+}
+
+export interface TimeSeriesOptions {
+  compression?: boolean;
+  batch_size?: number;
+  parallel_processing?: boolean;
+  skip_duplicates?: boolean;
+  validate_ohlcv?: boolean;
 }
 
 export interface Trade {

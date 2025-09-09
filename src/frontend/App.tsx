@@ -16,14 +16,19 @@ import { PositionManagement } from "./components/positions";
 import { ProfessionalTradingWorkspace } from "./components/trading/ProfessionalTradingWorkspace";
 import { InstitutionalDashboard } from "./components/institutional";
 
+// New Dashboard Components - FE-001 to FE-005
+import StrategyManagementDashboard from "./components/dashboard/StrategyManagementDashboard";
+import RealtimeTradingDashboard from "./components/dashboard/RealtimeTradingDashboard";
+import PerformanceAnalyticsDashboard from "./components/dashboard/PerformanceAnalyticsDashboard";
+import RiskManagementInterface from "./components/dashboard/RiskManagementInterface";
+import SystemMonitoringDashboard from "./components/dashboard/SystemMonitoringDashboard";
+
 // Hooks
 import { usePhantomWallet } from "@/frontend/hooks/usePhantomWallet";
 
-// Placeholder components for the remaining functionality (to be extracted later)
+// Updated components using new dashboards
 const AutoTradingDashboard: React.FC<any> = () => (
-  <div className="p-6 text-center text-muted-foreground">
-    Auto Trading Dashboard - To be refactored
-  </div>
+  <RealtimeTradingDashboard />
 );
 
 const AdvancedTradingInterface: React.FC = () => (
@@ -42,17 +47,12 @@ const TradeHistoryTab: React.FC = () => (
   <PositionManagement />
 );
 
-
 const AdvancedAnalytics: React.FC = () => (
-  <div className="p-6 text-center text-muted-foreground">
-    Advanced Analytics - To be refactored
-  </div>
+  <PerformanceAnalyticsDashboard />
 );
 
 const PaperTradingDashboard: React.FC<{ darkMode: boolean }> = () => (
-  <div className="p-6 text-center text-muted-foreground">
-    Paper Trading Dashboard - To be refactored
-  </div>
+  <RealtimeTradingDashboard />
 );
 
 const PortfolioOverview: React.FC = () => (
@@ -62,9 +62,7 @@ const PortfolioOverview: React.FC = () => (
 );
 
 const MarketStatistics: React.FC = () => (
-  <div className="p-6 text-center text-muted-foreground">
-    Market Statistics - To be refactored
-  </div>
+  <SystemMonitoringDashboard />
 );
 
 const BacktestEngine: React.FC = () => (
@@ -74,15 +72,11 @@ const BacktestEngine: React.FC = () => (
 );
 
 const StrategyPerformance: React.FC = () => (
-  <div className="p-6 text-center text-muted-foreground">
-    Strategy Performance - To be refactored
-  </div>
+  <PerformanceAnalyticsDashboard />
 );
 
 const StrategyLibrary: React.FC = () => (
-  <div className="p-6 text-center text-muted-foreground">
-    Strategy Library - To be refactored
-  </div>
+  <StrategyManagementDashboard />
 );
 
 /**
@@ -202,7 +196,7 @@ const TradingBotDashboard: React.FC = () => {
               </TabsContent>
 
               <TabsContent value="risk">
-                <RiskDashboard />
+                <RiskManagementInterface />
               </TabsContent>
 
               <TabsContent value="analytics">
@@ -245,7 +239,7 @@ const TradingBotDashboard: React.FC = () => {
               </TabsContent>
 
               <TabsContent value="risk">
-                <RiskDashboard />
+                <RiskManagementInterface />
               </TabsContent>
 
               <TabsContent value="analytics">

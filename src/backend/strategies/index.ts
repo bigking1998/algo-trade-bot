@@ -19,9 +19,17 @@ export type {
 export { StrategyFactory, createStrategyFactory, createStrategy } from './StrategyFactory.js';
 import { StrategyFactory } from './StrategyFactory.js';
 export { StrategyManager } from './StrategyManager.js';
+export { StrategyEngine } from './StrategyEngine.js';
+import { StrategyEngine } from './StrategyEngine.js';
 export { StrategyContextFactory } from './StrategyContext.js';
 export type { StrategyType } from './StrategyFactory.js';
 export type { StrategyExecution, StrategyManagerConfig } from './StrategyManager.js';
+export type { 
+  StrategyEngineConfig,
+  EngineExecutionContext,
+  EnginePerformanceMetrics,
+  EngineExecutionResult
+} from './StrategyEngine.js';
 
 // Data frame classes - Task BE-007 deliverables
 export { MarketDataFrame, IndicatorDataFrame, SignalDataFrame } from './DataStructures.js';
@@ -266,6 +274,7 @@ export class StrategyValidator {
 export default {
   BaseStrategy,
   StrategyFactory: StrategyFactory,
+  StrategyEngine,
   strategyFactory,
   MarketDataFrame,
   IndicatorDataFrame, 

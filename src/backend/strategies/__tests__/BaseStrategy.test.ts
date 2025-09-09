@@ -301,6 +301,7 @@ describe('BaseStrategy Framework', () => {
   describe('Performance Metrics', () => {
     beforeEach(async () => {
       await strategy.initialize();
+      await strategy.start();
     });
 
     it('should track execution metrics', async () => {

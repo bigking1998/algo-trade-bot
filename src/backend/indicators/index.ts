@@ -18,12 +18,15 @@ export * from './trend/WeightedMovingAverage.js';
 export * from './trend/MACD.js';
 export * from './trend/VWAP.js';
 export * from './trend/ParabolicSAR.js';
+export * from './trend/ADX.js';
 
 // Momentum indicators
 export * from './momentum/RSI.js';
 export * from './momentum/Stochastic.js';
 export * from './momentum/WilliamsR.js';
 export * from './momentum/CCI.js';
+export * from './momentum/TRIX.js';
+export * from './momentum/AROON.js';
 
 // Volatility indicators
 export * from './volatility/BollingerBands.js';
@@ -33,6 +36,7 @@ export * from './volatility/StandardDeviation.js';
 // Volume indicators
 export * from './volume/OBV.js';
 export * from './volume/AccumulationDistribution.js';
+export * from './volume/MFI.js';
 
 // Support/Resistance indicators
 export * from './support_resistance/PivotPoints.js';
@@ -45,15 +49,19 @@ import { WeightedMovingAverage } from './trend/WeightedMovingAverage.js';
 import { MACD } from './trend/MACD.js';
 import { VWAP } from './trend/VWAP.js';
 import { ParabolicSAR } from './trend/ParabolicSAR.js';
+import { ADX } from './trend/ADX.js';
 import { RSI } from './momentum/RSI.js';
 import { Stochastic } from './momentum/Stochastic.js';
 import { WilliamsR } from './momentum/WilliamsR.js';
 import { CCI } from './momentum/CCI.js';
+import { TRIX } from './momentum/TRIX.js';
+import { AROON } from './momentum/AROON.js';
 import { BollingerBands } from './volatility/BollingerBands.js';
 import { ATR } from './volatility/ATR.js';
 import { StandardDeviation } from './volatility/StandardDeviation.js';
 import { OBV } from './volume/OBV.js';
 import { AccumulationDistribution } from './volume/AccumulationDistribution.js';
+import { MFI } from './volume/MFI.js';
 import { PivotPoints } from './support_resistance/PivotPoints.js';
 import { FibonacciRetracement } from './support_resistance/FibonacciRetracement.js';
 
@@ -69,6 +77,7 @@ export const Indicators = {
   VWAP: VWAP,
   ParabolicSAR: ParabolicSAR,
   PSAR: ParabolicSAR,
+  ADX: ADX,
   
   // Momentum indicators
   RSI: RSI,
@@ -77,6 +86,8 @@ export const Indicators = {
   WilliamsR: WilliamsR,
   WILLR: WilliamsR,
   CCI: CCI,
+  TRIX: TRIX,
+  AROON: AROON,
   
   // Volatility indicators
   BB: BollingerBands,
@@ -89,6 +100,7 @@ export const Indicators = {
   OBV: OBV,
   AccumulationDistribution: AccumulationDistribution,
   AD: AccumulationDistribution,
+  MFI: MFI,
   
   // Support/Resistance indicators
   PivotPoints: PivotPoints,
@@ -132,6 +144,9 @@ export class IndicatorFactory {
       case 'PSAR':
         return new ParabolicSAR(config);
       
+      case 'ADX':
+        return new ADX(config);
+      
       // Momentum indicators
       case 'RSI':
         return new RSI(config);
@@ -146,6 +161,12 @@ export class IndicatorFactory {
       
       case 'CCI':
         return new CCI(config);
+      
+      case 'TRIX':
+        return new TRIX(config);
+      
+      case 'AROON':
+        return new AROON(config);
       
       // Volatility indicators
       case 'BB':
@@ -166,6 +187,9 @@ export class IndicatorFactory {
       case 'ACCUMULATIONDISTRIBUTION':
       case 'AD':
         return new AccumulationDistribution(config);
+      
+      case 'MFI':
+        return new MFI(config);
       
       // Support/Resistance indicators
       case 'PIVOTPOINTS':
@@ -194,12 +218,15 @@ export class IndicatorFactory {
       'MACD',
       'VWAP',
       'ParabolicSAR', 'PSAR',
+      'ADX',
       
       // Momentum indicators
       'RSI',
       'Stochastic', 'STOCH',
       'WilliamsR', 'WILLR',
       'CCI',
+      'TRIX',
+      'AROON',
       
       // Volatility indicators
       'BB', 'BollingerBands',
@@ -209,6 +236,7 @@ export class IndicatorFactory {
       // Volume indicators
       'OBV',
       'AccumulationDistribution', 'AD',
+      'MFI',
       
       // Support/Resistance indicators
       'PivotPoints', 'PP',
@@ -221,7 +249,7 @@ export class IndicatorFactory {
    */
   static validateConfig(name: string, config: any): boolean {
     try {
-      const indicator = this.create(name, config);
+      this.create(name, config);
       return true;
     } catch (error) {
       return false;
@@ -253,6 +281,10 @@ export const CommonConfigs = {
   PSAR_STANDARD: { accelerationFactor: 0.02, maxAcceleration: 0.2 },
   PSAR_FAST: { accelerationFactor: 0.03, maxAcceleration: 0.3 },
   
+  // ADX variants
+  ADX_14: { period: 14 },
+  ADX_21: { period: 21, wildersSmoothing: true },
+  
   // MACD variants
   MACD_STANDARD: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
   MACD_FAST: { fastPeriod: 8, slowPeriod: 17, signalPeriod: 6 },
@@ -274,6 +306,14 @@ export const CommonConfigs = {
   CCI_14: { period: 14 },
   CCI_20: { period: 20 },
   
+  // TRIX variants
+  TRIX_14: { period: 14, signalPeriod: 9 },
+  TRIX_21: { period: 21, signalPeriod: 9, scaleFactor: 10000 },
+  
+  // AROON variants
+  AROON_14: { period: 14 },
+  AROON_25: { period: 25, strongTrendThreshold: 75, weakTrendThreshold: 25 },
+  
   // Volatility indicators
   BB_STANDARD: { period: 20, stdDevMultiplier: 2.0 },
   BB_TIGHT: { period: 20, stdDevMultiplier: 1.5 },
@@ -292,6 +332,10 @@ export const CommonConfigs = {
   
   AD_STANDARD: { useRelative: false },
   AD_SIGNAL: { signalPeriod: 10 },
+  
+  // MFI variants
+  MFI_14: { period: 14, overboughtLevel: 80, oversoldLevel: 20 },
+  MFI_CONSERVATIVE: { period: 14, overboughtLevel: 85, oversoldLevel: 15 },
   
   // Support/Resistance indicators
   PP_STANDARD: { method: 'STANDARD' },

@@ -18,10 +18,10 @@ vi.mock('../PerformanceMonitor');
 vi.mock('../RiskController');
 vi.mock('../EventManager');
 
-const MockSignalProcessor = SignalProcessor as Mock;
-const MockPerformanceMonitor = PerformanceMonitor as Mock;
-const MockRiskController = RiskController as Mock;
-const MockEventManager = EventManager as Mock;
+const MockSignalProcessor = SignalProcessor as any;
+const MockPerformanceMonitor = PerformanceMonitor as any;
+const MockRiskController = RiskController as any;
+const MockEventManager = EventManager as any;
 
 // Mock repository interfaces
 const mockMarketDataRepository = {

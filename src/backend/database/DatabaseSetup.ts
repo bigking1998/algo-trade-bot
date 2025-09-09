@@ -65,7 +65,7 @@ export interface DatabaseHealth {
 export class DatabaseSetup extends EventEmitter {
   private pool: Pool;
   private config: DatabaseConfig;
-  private healthCheckInterval?: NodeJS.Timer;
+  private healthCheckInterval?: NodeJS.Timeout;
   private isConnected = false;
 
   constructor(config: DatabaseConfig) {
@@ -85,8 +85,12 @@ export class DatabaseSetup extends EventEmitter {
       // Test initial connection
       await this.testConnection();
       
-      // Setup TimescaleDB extension
-      await this.setupTimescaleDB();
+      // Setup TimescaleDB extension (if enabled)
+      if (process.env.DB_ENABLE_TIMESCALEDB === 'true') {
+        await this.setupTimescaleDB();
+      } else {
+        console.log('⏭️  TimescaleDB setup skipped (DB_ENABLE_TIMESCALEDB=false)');
+      }
       
       // Start health monitoring
       this.startHealthChecking();
@@ -446,7 +450,7 @@ export const getDefaultDatabaseConfig = (): DatabaseConfig => ({
   password: process.env.DB_PASSWORD || '',
   ssl: process.env.NODE_ENV === 'production' ? {
     rejectUnauthorized: false
-  } : false,
+  } : undefined,
   connectionPool: {
     max: 20, // As per task requirements
     min: 2,

@@ -1,25 +1,45 @@
 /**
- * MarketDataRepository Implementation - Task BE-005
+ * MarketDataRepository - Task BE-005: Market Data Repository Implementation
  * 
- * Production-ready market data repository with TimescaleDB optimization,
- * high-frequency data processing, bulk insertion capabilities, and 
- * comprehensive time-series analysis features for algorithmic trading.
+ * Time-series optimized repository extending BaseRepository for efficient OHLCV data storage,
+ * historical data retrieval, data compression strategies, and real-time data integration.
+ * Built specifically for TimescaleDB hypertables with advanced time-series features.
  */
 
 import { BaseRepository, RepositoryResult } from './BaseRepository';
-import { MarketData, CacheConfig, DatabaseError } from '../types/database';
+import {
+  MarketData,
+  MarketDataFilters,
+  MarketDataAggregation,
+  TimeSeriesOptions,
+  CacheConfig,
+  ValidationError,
+  DatabaseError,
+  QueryOptions
+} from '../types/database';
 
-/**
- * Market data query filters for flexible data retrieval
- */
-export interface MarketDataFilters {
-  symbols?: string[];
-  exchanges?: string[];
-  timeframes?: string[];
-  startTime?: Date;
-  endTime?: Date;
-  limit?: number;
-  includeVolume?: boolean;
+export interface CandleData {
+  time: number; // Unix timestamp in milliseconds
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface MarketDataInsert {
+  time: Date;
+  symbol: string;
+  exchange?: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  quote_volume?: number;
+  trades_count?: number;
+  timeframe: MarketData['timeframe'];
+  raw_data?: Record<string, unknown>;
 }
 
 /**
@@ -32,21 +52,23 @@ export interface BulkInsertOptions {
   batchTimeout?: number;
 }
 
-/**
- * Market data aggregation result for time-series analysis
- */
-export interface MarketDataAggregation {
-  symbol: string;
-  timeframe: string;
-  startTime: Date;
-  endTime: Date;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-  tradeCount: number;
-  vwap: number; // Volume Weighted Average Price
+export interface TimeSeriesResult<T> {
+  data: T[];
+  total_count: number;
+  start_time: Date;
+  end_time: Date;
+  compression_ratio?: number;
+  processing_time_ms: number;
+}
+
+export interface DataQualityReport {
+  total_records: number;
+  duplicate_count: number;
+  gap_count: number;
+  price_anomalies: number;
+  volume_anomalies: number;
+  missing_timeframes: string[];
+  data_coverage_percent: number;
 }
 
 /**
@@ -95,90 +117,375 @@ export interface CorrelationResult {
  * MarketDataRepository with TimescaleDB optimization and advanced time-series features
  */
 export class MarketDataRepository extends BaseRepository<MarketData> {
-  
+  private readonly BATCH_SIZE = 1000;
+  private readonly MAX_PARALLEL_INSERTS = 5;
+  private readonly CACHE_TTL_SHORT = 30; // 30 seconds for real-time data
+  private readonly CACHE_TTL_MEDIUM = 300; // 5 minutes for historical data
+  private readonly CACHE_TTL_LONG = 3600; // 1 hour for aggregated data
+
   constructor() {
-    super('market_data', 'time'); // time is the primary key for TimescaleDB hypertables
+    // MarketData uses composite primary key (time, symbol, timeframe)
+    // We'll use 'time' as the primary key field for BaseRepository compatibility
+    super('market_data', 'time');
   }
 
   /**
-   * BULK INSERTION METHODS FOR HIGH-FREQUENCY DATA
+   * TIME-SERIES OPTIMIZED STORAGE
    */
 
   /**
-   * Insert multiple candles with optimized batch processing
-   * Handles conflicts and provides detailed insertion metrics
+   * Insert single market data record with OHLCV validation
    */
-  async insertBulkCandles(
-    candles: Partial<MarketData>[],
-    options: BulkInsertOptions = {}
-  ): Promise<RepositoryResult<{
-    inserted: number;
-    updated: number;
-    skipped: number;
-    errors: number;
-    processingTimeMs: number;
-  }>> {
+  async insertMarketData(data: MarketDataInsert): Promise<RepositoryResult<MarketData>> {
     const startTime = Date.now();
-    const {
-      chunkSize = 1000,
-      onConflict = 'ignore',
-      validate = true,
-      batchTimeout = 5000
-    } = options;
+    
+    try {
+      await this.ensureInitialized();
+      
+      // Validate OHLCV data integrity
+      this.validateOHLCVData(data);
 
+      // Prepare data with defaults
+      const marketDataEntity: Partial<MarketData> = {
+        time: data.time,
+        symbol: data.symbol,
+        exchange: data.exchange || 'dydx',
+        open: data.open,
+        high: data.high,
+        low: data.low,
+        close: data.close,
+        volume: data.volume,
+        quote_volume: data.quote_volume,
+        trades_count: data.trades_count || 0,
+        timeframe: data.timeframe,
+        raw_data: data.raw_data,
+        created_at: new Date(),
+        updated_at: new Date()
+      };
+
+      // Use UPSERT to handle duplicates efficiently (TimescaleDB optimized)
+      const query = `
+        INSERT INTO market_data (
+          time, symbol, exchange, open, high, low, close, volume, 
+          quote_volume, trades_count, timeframe, raw_data, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        ON CONFLICT (time, symbol, timeframe) 
+        DO UPDATE SET
+          exchange = EXCLUDED.exchange,
+          open = EXCLUDED.open,
+          high = EXCLUDED.high,
+          low = EXCLUDED.low,
+          close = EXCLUDED.close,
+          volume = EXCLUDED.volume,
+          quote_volume = EXCLUDED.quote_volume,
+          trades_count = EXCLUDED.trades_count,
+          raw_data = EXCLUDED.raw_data,
+          updated_at = EXCLUDED.updated_at
+        RETURNING *
+      `;
+
+      const values = [
+        marketDataEntity.time,
+        marketDataEntity.symbol,
+        marketDataEntity.exchange,
+        marketDataEntity.open,
+        marketDataEntity.high,
+        marketDataEntity.low,
+        marketDataEntity.close,
+        marketDataEntity.volume,
+        marketDataEntity.quote_volume,
+        marketDataEntity.trades_count,
+        marketDataEntity.timeframe,
+        marketDataEntity.raw_data ? JSON.stringify(marketDataEntity.raw_data) : null,
+        marketDataEntity.created_at,
+        marketDataEntity.updated_at
+      ];
+
+      const result = await this.query<MarketData>(query, values);
+
+      if (!result.rows || result.rows.length === 0) {
+        throw new DatabaseError('Failed to insert market data - no rows returned');
+      }
+
+      // Invalidate related caches
+      await this.invalidateMarketDataCache(data.symbol, data.timeframe);
+
+      return {
+        success: true,
+        data: result.rows[0],
+        metadata: {
+          rowCount: 1,
+          executionTimeMs: Date.now() - startTime,
+        },
+      };
+
+    } catch (error) {
+      return this.handleError(error, 'insertMarketData', { executionTimeMs: Date.now() - startTime });
+    }
+  }
+
+  /**
+   * Bulk insert market data with parallel processing and batch optimization
+   */
+  async bulkInsertMarketData(
+    dataArray: MarketDataInsert[],
+    options: TimeSeriesOptions = {}
+  ): Promise<RepositoryResult<{ inserted: number; updated: number; failed: number; processing_time_ms: number }>> {
+    const startTime = Date.now();
+    
     try {
       await this.ensureInitialized();
 
-      if (validate) {
-        const validationErrors = await this.validateBulkCandles(candles);
-        if (validationErrors.length > 0) {
-          return {
-            success: false,
-            error: {
-              name: 'ValidationError',
-              message: `Bulk validation failed: ${validationErrors.join(', ')}`
-            } as DatabaseError,
-            metadata: { executionTimeMs: Date.now() - startTime }
-          };
+      if (dataArray.length === 0) {
+        return {
+          success: true,
+          data: { inserted: 0, updated: 0, failed: 0, processing_time_ms: 0 },
+          metadata: { rowCount: 0, executionTimeMs: 0 }
+        };
+      }
+
+      const opts = {
+        batch_size: options.batch_size || this.BATCH_SIZE,
+        parallel_processing: options.parallel_processing ?? true,
+        skip_duplicates: options.skip_duplicates ?? true,
+        validate_ohlcv: options.validate_ohlcv ?? true,
+        ...options
+      };
+
+      let inserted = 0;
+      let updated = 0;
+      let failed = 0;
+
+      // Validate data if enabled
+      if (opts.validate_ohlcv) {
+        for (const data of dataArray) {
+          try {
+            this.validateOHLCVData(data);
+          } catch (error) {
+            failed++;
+            console.warn(`[MarketDataRepository] Validation failed for ${data.symbol} at ${data.time}:`, error);
+          }
         }
       }
 
-      let totalInserted = 0;
-      let totalUpdated = 0;
-      let totalSkipped = 0;
-      let totalErrors = 0;
+      const validData = dataArray.slice(0, dataArray.length - failed);
 
-      // Process in chunks for optimal performance
-      for (let i = 0; i < candles.length; i += chunkSize) {
-        const chunk = candles.slice(i, i + chunkSize);
-        const chunkResult = await this.insertCandleChunk(chunk, onConflict, batchTimeout);
-        
-        totalInserted += chunkResult.inserted;
-        totalUpdated += chunkResult.updated;
-        totalSkipped += chunkResult.skipped;
-        totalErrors += chunkResult.errors;
+      // Process in batches
+      const batches: MarketDataInsert[][] = [];
+      for (let i = 0; i < validData.length; i += opts.batch_size) {
+        batches.push(validData.slice(i, i + opts.batch_size));
       }
 
-      // Invalidate related cache after bulk insertion
-      await this.invalidateCache([
-        'market_data:latest:*',
-        'market_data:candles:*',
-        'market_data:prices:*'
-      ]);
+      // Execute batches with controlled parallelism
+      const batchResults = await this.withTransaction(async (context) => {
+        const results: Array<{ inserted: number; updated: number }> = [];
+
+        // Sequential processing for simplicity in this implementation
+        for (const batch of batches) {
+          try {
+            const batchResult = await this.processBatch(batch, context.client, opts.skip_duplicates);
+            results.push(batchResult);
+          } catch (error) {
+            failed += batch.length;
+            console.error('[MarketDataRepository] Batch processing failed:', error);
+          }
+        }
+
+        return results;
+      });
+
+      if (batchResults.success && batchResults.data) {
+        for (const result of batchResults.data) {
+          inserted += result.inserted;
+          updated += result.updated;
+        }
+      }
+
+      // Invalidate relevant caches
+      const symbolSet = new Set(dataArray.map(d => d.symbol));
+      const uniqueSymbols = Array.from(symbolSet);
+      for (let i = 0; i < uniqueSymbols.length; i++) {
+        await this.invalidateMarketDataCache(uniqueSymbols[i]);
+      }
 
       return {
         success: true,
         data: {
-          inserted: totalInserted,
-          updated: totalUpdated,
-          skipped: totalSkipped,
-          errors: totalErrors,
-          processingTimeMs: Date.now() - startTime
-        }
+          inserted,
+          updated,
+          failed,
+          processing_time_ms: Date.now() - startTime
+        },
+        metadata: {
+          rowCount: inserted + updated,
+          executionTimeMs: Date.now() - startTime,
+        },
       };
 
     } catch (error) {
-      return this.handleError(error, 'insertBulkCandles', { executionTimeMs: Date.now() - startTime });
+      return this.handleError(error, 'bulkInsertMarketData', { executionTimeMs: Date.now() - startTime });
+    }
+  }
+
+  /**
+   * EFFICIENT HISTORICAL DATA RETRIEVAL
+   */
+
+  /**
+   * Get OHLCV candle data optimized for charting with TimescaleDB compression
+   */
+  async getOHLCVData(
+    symbol: string,
+    timeframe: MarketData['timeframe'],
+    startTime: Date,
+    endTime: Date,
+    limit?: number
+  ): Promise<RepositoryResult<CandleData[]>> {
+    const startQueryTime = Date.now();
+    
+    try {
+      await this.ensureInitialized();
+
+      const cacheKey = `ohlcv:${symbol}:${timeframe}:${startTime.toISOString()}:${endTime.toISOString()}:${limit || 'all'}`;
+      
+      // Optimized query using TimescaleDB time bucketing when appropriate
+      const query = `
+        SELECT 
+          EXTRACT(EPOCH FROM time) * 1000 as time,
+          open,
+          high, 
+          low,
+          close,
+          volume
+        FROM market_data
+        WHERE symbol = $1 
+          AND timeframe = $2
+          AND time >= $3 
+          AND time <= $4
+        ORDER BY time ASC
+        ${limit ? `LIMIT $${limit ? '5' : ''}` : ''}
+      `;
+
+      const params: any[] = [symbol, timeframe, startTime, endTime];
+      if (limit) {
+        params.push(limit);
+      }
+
+      const cacheOptions: CacheConfig = {
+        key: cacheKey,
+        ttl: this.CACHE_TTL_MEDIUM
+      };
+
+      const result = await this.query<CandleData>(query, params, cacheOptions);
+
+      return {
+        success: true,
+        data: result.rows || [],
+        metadata: {
+          rowCount: result.rows?.length || 0,
+          executionTimeMs: Date.now() - startQueryTime,
+        },
+      };
+
+    } catch (error) {
+      return this.handleError(error, 'getOHLCVData', { executionTimeMs: Date.now() - startQueryTime });
+    }
+  }
+
+  /**
+   * Get latest market data for multiple symbols with caching
+   */
+  async getLatestMarketData(
+    symbols: string[],
+    timeframe: MarketData['timeframe'] = '1h'
+  ): Promise<RepositoryResult<MarketData[]>> {
+    const startTime = Date.now();
+    
+    try {
+      await this.ensureInitialized();
+
+      if (symbols.length === 0) {
+        return {
+          success: true,
+          data: [],
+          metadata: { rowCount: 0, executionTimeMs: 0 }
+        };
+      }
+
+      const cacheKey = `latest:${symbols.sort().join(',')}:${timeframe}`;
+      
+      // Use DISTINCT ON for efficient latest record retrieval (PostgreSQL-specific optimization)
+      const query = `
+        SELECT DISTINCT ON (symbol) *
+        FROM market_data
+        WHERE symbol = ANY($1) 
+          AND timeframe = $2
+        ORDER BY symbol, time DESC
+      `;
+
+      const cacheOptions: CacheConfig = {
+        key: cacheKey,
+        ttl: this.CACHE_TTL_SHORT
+      };
+
+      const result = await this.query<MarketData>(query, [symbols, timeframe], cacheOptions);
+
+      return {
+        success: true,
+        data: result.rows || [],
+        metadata: {
+          rowCount: result.rows?.length || 0,
+          executionTimeMs: Date.now() - startTime,
+        },
+      };
+
+    } catch (error) {
+      return this.handleError(error, 'getLatestMarketData', { executionTimeMs: Date.now() - startTime });
+    }
+  }
+
+  /**
+   * Advanced filtering with pagination for large datasets
+   */
+  async searchMarketData(
+    filters: MarketDataFilters,
+    options: QueryOptions = {}
+  ): Promise<RepositoryResult<{ data: MarketData[]; total: number; page: number; pageSize: number }>> {
+    const startTime = Date.now();
+    
+    try {
+      await this.ensureInitialized();
+
+      const { query, countQuery, values } = this.buildFilteredQuery(filters, options);
+
+      // Execute count and data queries in parallel
+      const [countResult, dataResult] = await Promise.all([
+        this.query<{ count: number }>(countQuery, values),
+        this.query<MarketData>(query, values)
+      ]);
+
+      const total = parseInt(countResult.rows?.[0]?.count?.toString() || '0');
+      const limit = options.limit || 100;
+      const offset = options.offset || 0;
+      const page = Math.floor(offset / limit) + 1;
+
+      return {
+        success: true,
+        data: {
+          data: dataResult.rows || [],
+          total,
+          page,
+          pageSize: limit
+        },
+        metadata: {
+          rowCount: dataResult.rows?.length || 0,
+          executionTimeMs: Date.now() - startTime,
+        },
+      };
+
+    } catch (error) {
+      return this.handleError(error, 'searchMarketData', { executionTimeMs: Date.now() - startTime });
     }
   }
 
@@ -281,6 +588,137 @@ export class MarketDataRepository extends BaseRepository<MarketData> {
   /**
    * TIME-SERIES QUERY METHODS WITH TIMESCALEDB OPTIMIZATION
    */
+
+  /**
+   * DATA COMPRESSION AND AGGREGATION
+   */
+
+  /**
+   * Get aggregated time-series data using TimescaleDB time_bucket function
+   */
+  async getAggregatedData(
+    symbol: string,
+    sourceTimeframe: MarketData['timeframe'],
+    bucketInterval: string,
+    startTime: Date,
+    endTime: Date
+  ): Promise<RepositoryResult<MarketDataAggregation[]>> {
+    const startQueryTime = Date.now();
+    
+    try {
+      await this.ensureInitialized();
+
+      const cacheKey = `aggregated:${symbol}:${sourceTimeframe}:${bucketInterval}:${startTime.toISOString()}:${endTime.toISOString()}`;
+
+      // Use TimescaleDB time_bucket for efficient aggregation
+      const query = `
+        SELECT 
+          time_bucket($4, time) as period,
+          first(open, time) as open,
+          max(high) as high,
+          min(low) as low,
+          last(close, time) as close,
+          sum(volume) as volume,
+          sum(volume * close) / nullif(sum(volume), 0) as vwap,
+          sum(trades_count) as trades_count,
+          $2 as timeframe
+        FROM market_data
+        WHERE symbol = $1
+          AND timeframe = $2
+          AND time >= $3
+          AND time <= $5
+        GROUP BY time_bucket($4, time)
+        ORDER BY period ASC
+      `;
+
+      const cacheOptions: CacheConfig = {
+        key: cacheKey,
+        ttl: this.CACHE_TTL_LONG
+      };
+
+      const result = await this.query<MarketDataAggregation>(
+        query,
+        [symbol, sourceTimeframe, startTime, bucketInterval, endTime],
+        cacheOptions
+      );
+
+      return {
+        success: true,
+        data: result.rows || [],
+        metadata: {
+          rowCount: result.rows?.length || 0,
+          executionTimeMs: Date.now() - startQueryTime,
+        },
+      };
+
+    } catch (error) {
+      return this.handleError(error, 'getAggregatedData', { executionTimeMs: Date.now() - startQueryTime });
+    }
+  }
+
+  /**
+   * Compress old data using TimescaleDB compression policies
+   */
+  async compressHistoricalData(
+    symbol?: string,
+    olderThanDays: number = 30
+  ): Promise<RepositoryResult<{ chunks_compressed: number; compression_ratio: number; space_saved_mb: number }>> {
+    const startTime = Date.now();
+    
+    try {
+      await this.ensureInitialized();
+
+      // Enable compression for chunks older than specified days
+      const compressionQuery = `
+        SELECT compress_chunk(chunk_schema || '.' || chunk_name)
+        FROM timescaledb_information.chunks
+        WHERE hypertable_name = 'market_data'
+          AND range_end < NOW() - INTERVAL '${olderThanDays} days'
+          AND NOT is_compressed
+          ${symbol ? `AND range_start_value LIKE '%${symbol}%'` : ''}
+      `;
+
+      const result = await this.query(compressionQuery);
+      const chunksCompressed = result.rows?.length || 0;
+
+      // Get compression stats
+      const statsQuery = `
+        SELECT 
+          count(*) as total_chunks,
+          sum(before_compression_total_bytes) as before_bytes,
+          sum(after_compression_total_bytes) as after_bytes,
+          avg(before_compression_total_bytes::float / nullif(after_compression_total_bytes, 0)) as avg_ratio
+        FROM timescaledb_information.compressed_chunk_stats
+        WHERE hypertable_name = 'market_data'
+      `;
+
+      const statsResult = await this.query<{
+        total_chunks: number;
+        before_bytes: number;
+        after_bytes: number;
+        avg_ratio: number;
+      }>(statsQuery);
+
+      const stats = statsResult.rows?.[0];
+      const compressionRatio = stats?.avg_ratio || 1;
+      const spaceSavedMB = stats ? (stats.before_bytes - stats.after_bytes) / (1024 * 1024) : 0;
+
+      return {
+        success: true,
+        data: {
+          chunks_compressed: chunksCompressed,
+          compression_ratio: compressionRatio,
+          space_saved_mb: spaceSavedMB
+        },
+        metadata: {
+          executionTimeMs: Date.now() - startTime,
+        },
+      };
+
+    } catch (error) {
+      return this.handleError(error, 'compressHistoricalData', { executionTimeMs: Date.now() - startTime });
+    }
+  }
 
   /**
    * Get latest candles for a symbol with TimescaleDB time-bucket optimization
@@ -633,17 +1071,15 @@ export class MarketDataRepository extends BaseRepository<MarketData> {
       }>(query, [symbol, sourceTimeframe, limit], cacheOptions);
 
       const aggregations: MarketDataAggregation[] = (result.rows || []).map(row => ({
-        symbol: row.symbol,
-        timeframe: row.timeframe,
-        startTime: row.start_time,
-        endTime: row.end_time,
+        period: row.bucket_time.toISOString(),
         open: row.open,
         high: row.high,
         low: row.low,
         close: row.close,
         volume: row.volume,
-        tradeCount: row.trade_count,
-        vwap: row.vwap
+        vwap: row.vwap,
+        trades_count: row.trade_count,
+        timeframe: row.timeframe as MarketData['timeframe']
       }));
 
       return {
@@ -663,6 +1099,163 @@ export class MarketDataRepository extends BaseRepository<MarketData> {
   /**
    * DATA QUALITY AND VALIDATION METHODS
    */
+
+  /**
+   * DATA QUALITY AND VALIDATION
+   */
+
+  /**
+   * Validate market data quality and generate report
+   */
+  async validateDataQuality(
+    symbol?: string,
+    timeframe?: MarketData['timeframe'],
+    startTime?: Date,
+    endTime?: Date
+  ): Promise<RepositoryResult<DataQualityReport>> {
+    const startQueryTime = Date.now();
+    
+    try {
+      await this.ensureInitialized();
+
+      const whereConditions: string[] = [];
+      const params: any[] = [];
+      let paramIndex = 1;
+
+      if (symbol) {
+        whereConditions.push(`symbol = $${paramIndex++}`);
+        params.push(symbol);
+      }
+
+      if (timeframe) {
+        whereConditions.push(`timeframe = $${paramIndex++}`);
+        params.push(timeframe);
+      }
+
+      if (startTime) {
+        whereConditions.push(`time >= $${paramIndex++}`);
+        params.push(startTime);
+      }
+
+      if (endTime) {
+        whereConditions.push(`time <= $${paramIndex++}`);
+        params.push(endTime);
+      }
+
+      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+      const qualityQuery = `
+        WITH quality_stats AS (
+          SELECT 
+            COUNT(*) as total_records,
+            COUNT(DISTINCT (time, symbol, timeframe)) as unique_records,
+            COUNT(*) - COUNT(DISTINCT (time, symbol, timeframe)) as duplicates,
+            COUNT(*) FILTER (WHERE high < open OR high < close OR low > open OR low > close) as price_anomalies,
+            COUNT(*) FILTER (WHERE volume <= 0) as volume_anomalies
+          FROM market_data 
+          ${whereClause}
+        ),
+        expected_records AS (
+          SELECT 
+            symbol,
+            timeframe,
+            CASE timeframe
+              WHEN '1m' THEN EXTRACT(EPOCH FROM (max(time) - min(time))) / 60
+              WHEN '5m' THEN EXTRACT(EPOCH FROM (max(time) - min(time))) / 300
+              WHEN '15m' THEN EXTRACT(EPOCH FROM (max(time) - min(time))) / 900
+              WHEN '30m' THEN EXTRACT(EPOCH FROM (max(time) - min(time))) / 1800
+              WHEN '1h' THEN EXTRACT(EPOCH FROM (max(time) - min(time))) / 3600
+              WHEN '4h' THEN EXTRACT(EPOCH FROM (max(time) - min(time))) / 14400
+              WHEN '1d' THEN EXTRACT(EPOCH FROM (max(time) - min(time))) / 86400
+              ELSE 1
+            END as expected_count
+          FROM market_data 
+          ${whereClause}
+          GROUP BY symbol, timeframe
+        )
+        SELECT 
+          qs.total_records,
+          qs.duplicates as duplicate_count,
+          (qs.total_records - qs.unique_records) as gap_count,
+          qs.price_anomalies,
+          qs.volume_anomalies,
+          array_agg(DISTINCT er.timeframe) as timeframes_found,
+          CASE 
+            WHEN sum(er.expected_count) > 0 
+            THEN (qs.total_records::float / sum(er.expected_count) * 100)
+            ELSE 100
+          END as data_coverage_percent
+        FROM quality_stats qs
+        CROSS JOIN expected_records er
+        GROUP BY qs.total_records, qs.duplicates, qs.price_anomalies, qs.volume_anomalies, qs.unique_records
+      `;
+
+      const result = await this.query<any>(qualityQuery, params);
+      const stats = result.rows?.[0];
+
+      const qualityReport: DataQualityReport = {
+        total_records: parseInt(stats?.total_records || '0'),
+        duplicate_count: parseInt(stats?.duplicate_count || '0'),
+        gap_count: parseInt(stats?.gap_count || '0'),
+        price_anomalies: parseInt(stats?.price_anomalies || '0'),
+        volume_anomalies: parseInt(stats?.volume_anomalies || '0'),
+        missing_timeframes: [],
+        data_coverage_percent: parseFloat(stats?.data_coverage_percent || '0')
+      };
+
+      return {
+        success: true,
+        data: qualityReport,
+        metadata: {
+          executionTimeMs: Date.now() - startQueryTime,
+        },
+      };
+
+    } catch (error) {
+      return this.handleError(error, 'validateDataQuality', { executionTimeMs: Date.now() - startQueryTime });
+    }
+  }
+
+  /**
+   * REAL-TIME DATA INTEGRATION
+   */
+
+  /**
+   * Stream real-time market data updates with buffering
+   */
+  async streamMarketData(
+    symbols: string[],
+    timeframes: MarketData['timeframe'][],
+    callback: (data: MarketData) => void,
+    errorCallback?: (error: Error) => void
+  ): Promise<RepositoryResult<{ stream_id: string; status: 'active' | 'stopped' }>> {
+    const startTime = Date.now();
+    
+    try {
+      await this.ensureInitialized();
+
+      // This would integrate with a real-time data feed
+      // For now, we return a placeholder implementation
+      const streamId = `stream_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+
+      // Implementation would setup WebSocket or similar real-time connection
+      console.log(`[MarketDataRepository] Starting stream for symbols: ${symbols.join(',')}, timeframes: ${timeframes.join(',')}`);
+
+      return {
+        success: true,
+        data: {
+          stream_id: streamId,
+          status: 'active'
+        },
+        metadata: {
+          executionTimeMs: Date.now() - startTime,
+        },
+      };
+
+    } catch (error) {
+      return this.handleError(error, 'streamMarketData', { executionTimeMs: Date.now() - startTime });
+    }
+  }
 
   /**
    * Detect gaps in market data for data quality monitoring
@@ -823,22 +1416,242 @@ export class MarketDataRepository extends BaseRepository<MarketData> {
   }
 
   /**
-   * Override entity validation for market data
+   * PRIVATE HELPER METHODS
+   */
+
+  /**
+   * Process a batch of market data with transaction support
+   */
+  private async processBatch(
+    batch: MarketDataInsert[],
+    client: any,
+    skipDuplicates: boolean
+  ): Promise<{ inserted: number; updated: number }> {
+    let inserted = 0;
+    let updated = 0;
+
+    const conflictAction = skipDuplicates ? 'DO NOTHING' : `
+      DO UPDATE SET
+        exchange = EXCLUDED.exchange,
+        open = EXCLUDED.open,
+        high = EXCLUDED.high,
+        low = EXCLUDED.low,
+        close = EXCLUDED.close,
+        volume = EXCLUDED.volume,
+        quote_volume = EXCLUDED.quote_volume,
+        trades_count = EXCLUDED.trades_count,
+        raw_data = EXCLUDED.raw_data,
+        updated_at = EXCLUDED.updated_at
+    `;
+
+    for (const data of batch) {
+      const query = `
+        INSERT INTO market_data (
+          time, symbol, exchange, open, high, low, close, volume,
+          quote_volume, trades_count, timeframe, raw_data, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        ON CONFLICT (time, symbol, timeframe) ${conflictAction}
+      `;
+
+      const values = [
+        data.time,
+        data.symbol,
+        data.exchange || 'dydx',
+        data.open,
+        data.high,
+        data.low,
+        data.close,
+        data.volume,
+        data.quote_volume,
+        data.trades_count || 0,
+        data.timeframe,
+        data.raw_data ? JSON.stringify(data.raw_data) : null,
+        new Date(),
+        new Date()
+      ];
+
+      const result = await client.query(query, values);
+      const rowCount = result.rowCount || 0;
+
+      if (skipDuplicates) {
+        inserted += rowCount;
+      } else {
+        inserted += rowCount;
+      }
+    }
+
+    return { inserted, updated };
+  }
+
+  /**
+   * Build filtered query for advanced search
+   */
+  private buildFilteredQuery(
+    filters: MarketDataFilters,
+    options: QueryOptions
+  ): { query: string; countQuery: string; values: any[] } {
+    const whereConditions: string[] = [];
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    // Build WHERE conditions
+    if (filters.symbol) {
+      whereConditions.push(`symbol = $${paramIndex++}`);
+      params.push(filters.symbol);
+    }
+
+    if (filters.symbols?.length) {
+      whereConditions.push(`symbol = ANY($${paramIndex++})`);
+      params.push(filters.symbols);
+    }
+
+    if (filters.timeframe) {
+      whereConditions.push(`timeframe = $${paramIndex++}`);
+      params.push(filters.timeframe);
+    }
+
+    if (filters.timeframes?.length) {
+      whereConditions.push(`timeframe = ANY($${paramIndex++})`);
+      params.push(filters.timeframes);
+    }
+
+    if (filters.start_time) {
+      whereConditions.push(`time >= $${paramIndex++}`);
+      params.push(filters.start_time);
+    }
+
+    if (filters.end_time) {
+      whereConditions.push(`time <= $${paramIndex++}`);
+      params.push(filters.end_time);
+    }
+
+    if (filters.min_volume !== undefined) {
+      whereConditions.push(`volume >= $${paramIndex++}`);
+      params.push(filters.min_volume);
+    }
+
+    if (filters.max_volume !== undefined) {
+      whereConditions.push(`volume <= $${paramIndex++}`);
+      params.push(filters.max_volume);
+    }
+
+    if (filters.min_price !== undefined) {
+      whereConditions.push(`close >= $${paramIndex++}`);
+      params.push(filters.min_price);
+    }
+
+    if (filters.max_price !== undefined) {
+      whereConditions.push(`close <= $${paramIndex++}`);
+      params.push(filters.max_price);
+    }
+
+    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+    // Build ORDER BY
+    const orderBy = options.orderBy || 'time';
+    const orderDirection = options.orderDirection || 'DESC';
+
+    // Build pagination
+    const limit = options.limit || 100;
+    const offset = options.offset || 0;
+
+    const baseQuery = `FROM market_data ${whereClause}`;
+    const query = `SELECT * ${baseQuery} ORDER BY ${orderBy} ${orderDirection} LIMIT ${limit} OFFSET ${offset}`;
+    const countQuery = `SELECT COUNT(*) ${baseQuery}`;
+
+    return { query, countQuery, values: params };
+  }
+
+  /**
+   * Validate OHLCV data integrity
+   */
+  private validateOHLCVData(data: MarketDataInsert): void {
+    if (data.high < Math.max(data.open, data.close)) {
+      throw new ValidationError('High price cannot be less than open or close price');
+    }
+
+    if (data.low > Math.min(data.open, data.close)) {
+      throw new ValidationError('Low price cannot be greater than open or close price');
+    }
+
+    if (data.volume < 0) {
+      throw new ValidationError('Volume cannot be negative');
+    }
+
+    if (data.open <= 0 || data.high <= 0 || data.low <= 0 || data.close <= 0) {
+      throw new ValidationError('Prices must be positive');
+    }
+
+    const validTimeframes = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'];
+    if (!validTimeframes.includes(data.timeframe)) {
+      throw new ValidationError(`Invalid timeframe: ${data.timeframe}`);
+    }
+  }
+
+  /**
+   * Invalidate market data related caches
+   */
+  private async invalidateMarketDataCache(symbol?: string, timeframe?: MarketData['timeframe']): Promise<void> {
+    const patterns = [
+      'latest:*',
+      'ohlcv:*',
+      'aggregated:*'
+    ];
+
+    if (symbol) {
+      patterns.push(`latest:*${symbol}*`);
+      patterns.push(`ohlcv:${symbol}:*`);
+      patterns.push(`aggregated:${symbol}:*`);
+    }
+
+    await this.invalidateCache(patterns);
+  }
+
+  /**
+   * Override entity validation with market data specific logic
    */
   protected async validateEntity(entity: Partial<MarketData>, operation: 'create' | 'update'): Promise<void> {
+    await super.validateEntity(entity, operation);
+
     if (operation === 'create') {
+      if (!entity.time) {
+        throw new ValidationError('Time is required for market data');
+      }
+
       if (!entity.symbol) {
-        throw new Error('Symbol is required for market data');
+        throw new ValidationError('Symbol is required for market data');
       }
+
       if (!entity.timeframe) {
-        throw new Error('Timeframe is required for market data');
+        throw new ValidationError('Timeframe is required for market data');
       }
-      if (entity.open !== undefined && entity.open < 0) {
-        throw new Error('Open price cannot be negative');
+
+      if (entity.open === undefined || entity.high === undefined || 
+          entity.low === undefined || entity.close === undefined) {
+        throw new ValidationError('OHLC prices are required for market data');
       }
-      if (entity.high !== undefined && entity.low !== undefined && entity.high < entity.low) {
-        throw new Error('High price cannot be less than low price');
+
+      if (entity.volume === undefined) {
+        throw new ValidationError('Volume is required for market data');
       }
+    }
+
+    // Additional market data validations
+    if (entity.open !== undefined && entity.open <= 0) {
+      throw new ValidationError('Open price must be positive');
+    }
+    if (entity.high !== undefined && entity.high <= 0) {
+      throw new ValidationError('High price must be positive');
+    }
+    if (entity.low !== undefined && entity.low <= 0) {
+      throw new ValidationError('Low price must be positive');
+    }
+    if (entity.close !== undefined && entity.close <= 0) {
+      throw new ValidationError('Close price must be positive');
+    }
+    if (entity.volume !== undefined && entity.volume < 0) {
+      throw new ValidationError('Volume cannot be negative');
     }
   }
 }

@@ -45,6 +45,9 @@ export interface MigrationOptions {
   force?: boolean;
   verbose?: boolean;
   timeout?: number;
+  performanceTarget?: number; // Target execution time in ms (default: 30000)
+  checkDependencies?: boolean; // Enable dependency validation
+  createBackup?: boolean; // Create backup before migration
 }
 
 /**
@@ -167,13 +170,51 @@ export class MigrationManager {
    * Apply all pending migrations
    */
   async migrate(options: MigrationOptions = {}): Promise<MigrationResult> {
+    // Set performance target default
+    const performanceTarget = options.performanceTarget || 30000; // 30 seconds
+    
+    // Validate setup first
+    const setupValidation = await this.isSetupValid();
+    if (!setupValidation.valid && !options.force) {
+      throw new Error(`Migration setup invalid: ${setupValidation.errors.join(', ')}`);
+    }
+
+    // Check dependencies if enabled
+    if (options.checkDependencies !== false) {
+      const depCheck = await this.validateDependencies();
+      if (!depCheck.valid && !options.force) {
+        throw new Error(`Dependency validation failed: ${depCheck.issues.join(', ')}`);
+      }
+    }
+
+    // Create backup if requested
+    if (options.createBackup) {
+      const backup = await this.createBackup();
+      if (!backup.success && !options.force) {
+        throw new Error(`Backup creation failed: ${backup.error}`);
+      }
+    }
+
     const args = ['migrate'];
     
     if (options.dryRun) args.push('--dry-run');
     if (options.force) args.push('--force');
     if (!options.verbose) args.push('--quiet');
 
-    return this.runMigrationCommand(args, options);
+    // Set timeout based on performance target
+    const migrationOptions = {
+      ...options,
+      timeout: Math.max(options.timeout || 0, performanceTarget)
+    };
+
+    const result = await this.runMigrationCommand(args, migrationOptions);
+    
+    // Validate performance target
+    if (result.executionTime && result.executionTime > performanceTarget) {
+      console.warn(`⚠️ Migration exceeded performance target: ${result.executionTime}ms > ${performanceTarget}ms`);
+    }
+
+    return result;
   }
 
   /**
@@ -190,9 +231,34 @@ export class MigrationManager {
   }
 
   /**
-   * Rollback migrations
+   * Rollback migrations with enhanced safety and data integrity
    */
   async rollback(options: MigrationOptions & { count?: number; toVersion?: string } = {}): Promise<MigrationResult> {
+    // Set rollback target (default: 15 seconds)
+    const rollbackTarget = 15000; 
+    
+    // Validate setup first
+    const setupValidation = await this.isSetupValid();
+    if (!setupValidation.valid && !options.force) {
+      throw new Error(`Migration setup invalid: ${setupValidation.errors.join(', ')}`);
+    }
+
+    // Create backup before rollback if requested
+    if (options.createBackup) {
+      const backup = await this.createBackup();
+      if (!backup.success && !options.force) {
+        throw new Error(`Pre-rollback backup failed: ${backup.error}`);
+      }
+    }
+
+    // Validate rollback integrity
+    if (!options.dryRun) {
+      const integrity = await this.validateIntegrity();
+      if (!integrity.valid && !options.force) {
+        throw new Error(`Rollback integrity check failed: ${integrity.issues.join(', ')}`);
+      }
+    }
+
     const args = ['rollback'];
     
     if (options.toVersion) {
@@ -205,7 +271,32 @@ export class MigrationManager {
     if (options.force) args.push('--force');
     if (!options.verbose) args.push('--quiet');
 
-    return this.runMigrationCommand(args, options);
+    // Set timeout for rollback operations
+    const rollbackOptions = {
+      ...options,
+      timeout: Math.max(options.timeout || 0, rollbackTarget)
+    };
+
+    const result = await this.runMigrationCommand(args, rollbackOptions);
+    
+    // Validate rollback performance target
+    if (result.executionTime && result.executionTime > rollbackTarget) {
+      console.warn(`⚠️ Rollback exceeded performance target: ${result.executionTime}ms > ${rollbackTarget}ms`);
+    }
+
+    // Post-rollback validation
+    if (result.success && !options.dryRun) {
+      try {
+        const postRollbackIntegrity = await this.validateIntegrity();
+        if (!postRollbackIntegrity.valid && !options.force) {
+          console.warn('⚠️ Post-rollback integrity issues detected:', postRollbackIntegrity.issues);
+        }
+      } catch (error) {
+        console.warn('⚠️ Post-rollback validation failed:', error);
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -334,21 +425,87 @@ export class MigrationManager {
   }
 
   /**
+   * Validate migration dependencies
+   */
+  async validateDependencies(): Promise<{ valid: boolean; issues: string[] }> {
+    const issues: string[] = [];
+    
+    try {
+      const status = await this.getStatus();
+      const migrations = status.migrations;
+      
+      // Check for gaps in migration sequence
+      const appliedVersions = migrations
+        .filter(m => m.applied)
+        .map(m => parseInt(m.version))
+        .sort((a, b) => a - b);
+      
+      for (let i = 1; i < appliedVersions.length; i++) {
+        if (appliedVersions[i] !== appliedVersions[i - 1] + 1) {
+          issues.push(`Gap in migration sequence: ${appliedVersions[i - 1]} -> ${appliedVersions[i]}`);
+        }
+      }
+      
+      // Check for missing migrations that should exist
+      const allVersions = migrations.map(m => parseInt(m.version)).sort((a, b) => a - b);
+      const maxVersion = Math.max(...allVersions);
+      
+      for (let v = 1; v <= maxVersion; v++) {
+        const versionStr = String(v).padStart(3, '0');
+        if (!migrations.find(m => m.version === versionStr)) {
+          issues.push(`Missing migration file for version ${versionStr}`);
+        }
+      }
+      
+      // Check rollback file dependencies for applied migrations
+      for (const migration of migrations.filter(m => m.applied)) {
+        const rollbackPath = path.join(
+          process.cwd(), 
+          'database', 
+          'migrations', 
+          'rollbacks', 
+          `${migration.version}_${migration.name}_down.sql`
+        );
+        
+        try {
+          await fs.access(rollbackPath);
+        } catch (error) {
+          issues.push(`Missing rollback file for applied migration ${migration.version}: ${migration.name}`);
+        }
+      }
+      
+    } catch (error) {
+      issues.push(`Dependency validation error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+    
+    return {
+      valid: issues.length === 0,
+      issues
+    };
+  }
+
+  /**
    * Create database backup before migration
    */
   async createBackup(): Promise<{ success: boolean; backupPath?: string; error?: string }> {
     try {
-      // This would integrate with the existing backup system from DB-001
-      // For now, we'll simulate the backup creation
+      // Import DatabaseSetup for backup functionality
+      const { DatabaseSetup, getDefaultDatabaseConfig } = await import('./DatabaseSetup.js');
+      
+      const dbSetup = new DatabaseSetup(getDefaultDatabaseConfig());
+      await dbSetup.initialize();
+      
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const backupPath = path.join(process.cwd(), 'database', 'backups', `pre_migration_${timestamp}.sql`);
       
-      // In a real implementation, this would call the backup script
-      console.log(`[MigrationManager] Creating backup at ${backupPath}`);
+      // Use the existing backup system from DB-001
+      const backupResult = await dbSetup.performBackup();
+      await dbSetup.close();
       
+      console.log(`[MigrationManager] Backup created successfully: ${backupResult}`);
       return {
         success: true,
-        backupPath
+        backupPath: backupResult
       };
     } catch (error) {
       return {
