@@ -1,0 +1,325 @@
+# ===========================================
+# POSTGRESQL CUSTOM METRICS FOR TRADING BOT
+# ===========================================
+
+# Trading Bot Specific Queries
+trading_bot_metrics:
+  query: |
+    SELECT 
+      'trades' as table_name,
+      count(*) as total_count,
+      count(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 hour') as hourly_count,
+      count(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 day') as daily_count,
+      count(*) FILTER (WHERE status = 'completed') as completed_count,
+      count(*) FILTER (WHERE status = 'failed') as failed_count,
+      avg(profit_loss) FILTER (WHERE status = 'completed' AND created_at > NOW() - INTERVAL '1 day') as avg_daily_pnl,
+      sum(profit_loss) FILTER (WHERE status = 'completed' AND created_at > NOW() - INTERVAL '1 day') as total_daily_pnl
+    FROM trades
+    UNION ALL
+    SELECT 
+      'strategies' as table_name,
+      count(*) as total_count,
+      count(*) FILTER (WHERE updated_at > NOW() - INTERVAL '1 hour') as hourly_count,
+      count(*) FILTER (WHERE updated_at > NOW() - INTERVAL '1 day') as daily_count,
+      count(*) FILTER (WHERE status = 'active') as completed_count,
+      count(*) FILTER (WHERE status = 'error') as failed_count,
+      0 as avg_daily_pnl,
+      0 as total_daily_pnl
+    FROM strategies;
+  master: true
+  metrics:
+    - table_name:
+        usage: "LABEL"
+        description: "Table name"
+    - total_count:
+        usage: "GAUGE"
+        description: "Total number of records"
+    - hourly_count:
+        usage: "GAUGE"
+        description: "Records created/updated in last hour"
+    - daily_count:
+        usage: "GAUGE"
+        description: "Records created/updated in last day"
+    - completed_count:
+        usage: "GAUGE"
+        description: "Number of completed/successful records"
+    - failed_count:
+        usage: "GAUGE"
+        description: "Number of failed/error records"
+    - avg_daily_pnl:
+        usage: "GAUGE"
+        description: "Average daily P&L for trades"
+    - total_daily_pnl:
+        usage: "GAUGE"
+        description: "Total daily P&L for trades"
+
+# Portfolio Performance Metrics
+portfolio_metrics:
+  query: |
+    SELECT 
+      symbol,
+      sum(quantity) as total_position,
+      sum(unrealized_pnl) as unrealized_pnl,
+      sum(realized_pnl) as realized_pnl,
+      count(*) as position_count,
+      avg(entry_price) as avg_entry_price,
+      max(updated_at) as last_updated
+    FROM positions 
+    WHERE status = 'active'
+    GROUP BY symbol;
+  master: true
+  metrics:
+    - symbol:
+        usage: "LABEL"
+        description: "Trading symbol"
+    - total_position:
+        usage: "GAUGE"
+        description: "Total position size"
+    - unrealized_pnl:
+        usage: "GAUGE"
+        description: "Unrealized profit and loss"
+    - realized_pnl:
+        usage: "GAUGE"
+        description: "Realized profit and loss"
+    - position_count:
+        usage: "GAUGE"
+        description: "Number of positions"
+    - avg_entry_price:
+        usage: "GAUGE"
+        description: "Average entry price"
+
+# Strategy Performance Metrics
+strategy_performance:
+  query: |
+    SELECT 
+      s.id as strategy_id,
+      s.name as strategy_name,
+      s.status,
+      count(t.id) as total_trades,
+      count(t.id) FILTER (WHERE t.profit_loss > 0) as winning_trades,
+      count(t.id) FILTER (WHERE t.profit_loss < 0) as losing_trades,
+      coalesce(avg(t.profit_loss), 0) as avg_pnl,
+      coalesce(sum(t.profit_loss), 0) as total_pnl,
+      coalesce(max(t.profit_loss), 0) as max_win,
+      coalesce(min(t.profit_loss), 0) as max_loss,
+      extract(epoch from max(t.created_at)) as last_trade_timestamp
+    FROM strategies s
+    LEFT JOIN trades t ON s.id = t.strategy_id AND t.created_at > NOW() - INTERVAL '7 days'
+    GROUP BY s.id, s.name, s.status;
+  master: true
+  metrics:
+    - strategy_id:
+        usage: "LABEL"
+        description: "Strategy ID"
+    - strategy_name:
+        usage: "LABEL"
+        description: "Strategy name"
+    - status:
+        usage: "LABEL"
+        description: "Strategy status"
+    - total_trades:
+        usage: "GAUGE"
+        description: "Total trades in last 7 days"
+    - winning_trades:
+        usage: "GAUGE"
+        description: "Winning trades in last 7 days"
+    - losing_trades:
+        usage: "GAUGE"
+        description: "Losing trades in last 7 days"
+    - avg_pnl:
+        usage: "GAUGE"
+        description: "Average P&L per trade"
+    - total_pnl:
+        usage: "GAUGE"
+        description: "Total P&L in last 7 days"
+    - max_win:
+        usage: "GAUGE"
+        description: "Maximum winning trade"
+    - max_loss:
+        usage: "GAUGE"
+        description: "Maximum losing trade"
+    - last_trade_timestamp:
+        usage: "GAUGE"
+        description: "Timestamp of last trade"
+
+# Market Data Freshness
+market_data_freshness:
+  query: |
+    SELECT 
+      symbol,
+      timeframe,
+      extract(epoch from max(timestamp)) as latest_timestamp,
+      extract(epoch from NOW()) - extract(epoch from max(timestamp)) as seconds_since_last_update,
+      count(*) as total_candles,
+      count(*) FILTER (WHERE timestamp > NOW() - INTERVAL '1 hour') as hourly_candles
+    FROM market_data 
+    GROUP BY symbol, timeframe;
+  master: true
+  metrics:
+    - symbol:
+        usage: "LABEL"
+        description: "Trading symbol"
+    - timeframe:
+        usage: "LABEL"
+        description: "Timeframe"
+    - latest_timestamp:
+        usage: "GAUGE"
+        description: "Latest market data timestamp"
+    - seconds_since_last_update:
+        usage: "GAUGE"
+        description: "Seconds since last market data update"
+    - total_candles:
+        usage: "GAUGE"
+        description: "Total number of candles"
+    - hourly_candles:
+        usage: "GAUGE"
+        description: "Candles received in last hour"
+
+# Database Connection Health
+connection_health:
+  query: |
+    SELECT 
+      state,
+      count(*) as connection_count
+    FROM pg_stat_activity 
+    WHERE application_name LIKE 'trading_bot%'
+    GROUP BY state;
+  master: true
+  metrics:
+    - state:
+        usage: "LABEL"
+        description: "Connection state"
+    - connection_count:
+        usage: "GAUGE"
+        description: "Number of connections in this state"
+
+# Table Size and Growth Metrics
+table_size_metrics:
+  query: |
+    SELECT 
+      schemaname,
+      tablename,
+      pg_total_relation_size(schemaname||'.'||tablename) as table_size_bytes,
+      pg_relation_size(schemaname||'.'||tablename) as data_size_bytes,
+      pg_total_relation_size(schemaname||'.'||tablename) - pg_relation_size(schemaname||'.'||tablename) as index_size_bytes
+    FROM pg_tables 
+    WHERE schemaname = 'public' 
+    AND tablename IN ('trades', 'market_data', 'strategies', 'positions', 'orders', 'portfolio_snapshots');
+  master: true
+  metrics:
+    - schemaname:
+        usage: "LABEL"
+        description: "Schema name"
+    - tablename:
+        usage: "LABEL"
+        description: "Table name"
+    - table_size_bytes:
+        usage: "GAUGE"
+        description: "Total table size in bytes"
+    - data_size_bytes:
+        usage: "GAUGE"
+        description: "Data size in bytes"
+    - index_size_bytes:
+        usage: "GAUGE"
+        description: "Index size in bytes"
+
+# Query Performance Metrics
+query_performance:
+  query: |
+    SELECT 
+      query,
+      calls,
+      total_time,
+      mean_time,
+      stddev_time,
+      rows,
+      100.0 * shared_blks_hit / nullif(shared_blks_hit + shared_blks_read, 0) AS hit_percent
+    FROM pg_stat_statements 
+    WHERE query LIKE '%trades%' OR query LIKE '%strategies%' OR query LIKE '%market_data%'
+    ORDER BY total_time DESC
+    LIMIT 10;
+  master: true
+  metrics:
+    - query:
+        usage: "LABEL"
+        description: "SQL query (truncated)"
+    - calls:
+        usage: "GAUGE"
+        description: "Number of times executed"
+    - total_time:
+        usage: "GAUGE"
+        description: "Total time spent executing"
+    - mean_time:
+        usage: "GAUGE"
+        description: "Mean execution time"
+    - stddev_time:
+        usage: "GAUGE"
+        description: "Standard deviation of execution time"
+    - rows:
+        usage: "GAUGE"
+        description: "Total rows retrieved or affected"
+    - hit_percent:
+        usage: "GAUGE"
+        description: "Cache hit percentage"
+
+# Lock Monitoring
+lock_monitoring:
+  query: |
+    SELECT 
+      mode,
+      locktype,
+      granted,
+      count(*) as lock_count
+    FROM pg_locks 
+    GROUP BY mode, locktype, granted
+    ORDER BY lock_count DESC;
+  master: true
+  metrics:
+    - mode:
+        usage: "LABEL"
+        description: "Lock mode"
+    - locktype:
+        usage: "LABEL"
+        description: "Lock type"
+    - granted:
+        usage: "LABEL"
+        description: "Whether lock is granted"
+    - lock_count:
+        usage: "GAUGE"
+        description: "Number of locks"
+
+# Replication Lag (if applicable)
+replication_lag:
+  query: |
+    SELECT 
+      client_addr,
+      application_name,
+      state,
+      extract(epoch from (now() - backend_start)) as backend_start_seconds,
+      extract(epoch from (now() - state_change)) as state_change_seconds,
+      pg_wal_lsn_diff(pg_current_wal_lsn(), sent_lsn) as sent_lag_bytes,
+      pg_wal_lsn_diff(pg_current_wal_lsn(), flush_lsn) as flush_lag_bytes
+    FROM pg_stat_replication;
+  master: true
+  metrics:
+    - client_addr:
+        usage: "LABEL"
+        description: "Client address"
+    - application_name:
+        usage: "LABEL"
+        description: "Application name"
+    - state:
+        usage: "LABEL"
+        description: "Replication state"
+    - backend_start_seconds:
+        usage: "GAUGE"
+        description: "Seconds since backend start"
+    - state_change_seconds:
+        usage: "GAUGE"
+        description: "Seconds since state change"
+    - sent_lag_bytes:
+        usage: "GAUGE"
+        description: "Sent lag in bytes"
+    - flush_lag_bytes:
+        usage: "GAUGE"
+        description: "Flush lag in bytes"

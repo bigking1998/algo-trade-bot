@@ -1,0 +1,300 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # ===========================================
+  # DOCKER CONTAINER LOGS
+  # ===========================================
+  - job_name: containers
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: containerlogs
+          __path__: /var/lib/docker/containers/*/*log
+
+    pipeline_stages:
+      - json:
+          expressions:
+            output: log
+            stream: stream
+            attrs:
+      - json:
+          expressions:
+            tag:
+          source: attrs
+      - regex:
+          expression: (?P<container_name>(?:[^|])*[^|])
+          source: tag
+      - timestamp:
+          format: RFC3339Nano
+          source: time
+      - labels:
+          stream:
+          container_name:
+      - output:
+          source: output
+
+  # ===========================================
+  # TRADING BOT APPLICATION LOGS
+  # ===========================================
+  - job_name: trading-bot-backend
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: trading-bot-backend
+          service: backend
+          environment: ${ENVIRONMENT:-development}
+          __path__: /var/log/trading-bot/backend/*.log
+
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            message: message
+            component: component
+            trade_id: trade_id
+            strategy_id: strategy_id
+            symbol: symbol
+            error: error
+            duration_ms: duration_ms
+            request_id: request_id
+      - timestamp:
+          format: RFC3339
+          source: timestamp
+      - labels:
+          level:
+          component:
+          service:
+          environment:
+          strategy_id:
+          symbol:
+      - output:
+          source: message
+
+  # ===========================================
+  # TRADING BOT ERROR LOGS
+  # ===========================================
+  - job_name: trading-bot-errors
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: trading-bot-errors
+          service: backend
+          severity: error
+          __path__: /var/log/trading-bot/errors/*.log
+
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            message: message
+            error: error
+            stack_trace: stack_trace
+            component: component
+            request_id: request_id
+      - timestamp:
+          format: RFC3339
+          source: timestamp
+      - labels:
+          level:
+          component:
+          service:
+          severity:
+      - output:
+          source: message
+
+  # ===========================================
+  # NGINX ACCESS LOGS
+  # ===========================================
+  - job_name: nginx-access
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nginx-access
+          service: nginx
+          log_type: access
+          __path__: /var/log/nginx/access.log
+
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<remote_addr>\S+) - (?P<remote_user>\S+) \[(?P<time_local>[^\]]+)\] "(?P<method>\S+) (?P<request_uri>\S+) (?P<protocol>\S+)" (?P<status>\d+) (?P<body_bytes_sent>\d+) "(?P<http_referer>[^"]*)" "(?P<http_user_agent>[^"]*)" "(?P<http_x_forwarded_for>[^"]*)" (?P<response_time>\S+)'
+      - timestamp:
+          format: 02/Jan/2006:15:04:05 -0700
+          source: time_local
+      - labels:
+          method:
+          status:
+          service:
+          log_type:
+
+  # ===========================================
+  # NGINX ERROR LOGS
+  # ===========================================
+  - job_name: nginx-error
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nginx-error
+          service: nginx
+          log_type: error
+          __path__: /var/log/nginx/error.log
+
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}) \[(?P<level>\w+)\] (?P<pid>\d+)#(?P<tid>\d+): (?P<message>.*)'
+      - timestamp:
+          format: 2006/01/02 15:04:05
+          source: timestamp
+      - labels:
+          level:
+          service:
+          log_type:
+
+  # ===========================================
+  # POSTGRESQL LOGS
+  # ===========================================
+  - job_name: postgresql
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: postgresql
+          service: database
+          __path__: /var/log/postgresql/*.log
+
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.\d{3}) (?P<timezone>\w+) \[(?P<pid>\d+)\] (?P<level>\w+):\s+(?P<message>.*)'
+      - timestamp:
+          format: 2006-01-02 15:04:05.000
+          source: timestamp
+      - labels:
+          level:
+          service:
+          pid:
+
+  # ===========================================
+  # REDIS LOGS
+  # ===========================================
+  - job_name: redis
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: redis
+          service: cache
+          __path__: /var/log/redis/*.log
+
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<pid>\d+):(?P<role>\w+) (?P<timestamp>\d{2} \w{3} \d{4} \d{2}:\d{2}:\d{2}.\d{3}) (?P<level>[*#-]) (?P<message>.*)'
+      - timestamp:
+          format: 02 Jan 2006 15:04:05.000
+          source: timestamp
+      - labels:
+          level:
+          role:
+          service:
+
+  # ===========================================
+  # SYSTEM LOGS (SYSLOG)
+  # ===========================================
+  - job_name: syslog
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: syslog
+          service: system
+          __path__: /var/log/syslog
+
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\w{3} \d{1,2} \d{2}:\d{2}:\d{2}) (?P<hostname>\S+) (?P<service>\S+)(?:\[(?P<pid>\d+)\])?: (?P<message>.*)'
+      - timestamp:
+          format: Jan 2 15:04:05
+          source: timestamp
+      - labels:
+          hostname:
+          service:
+          pid:
+
+  # ===========================================
+  # CUSTOM APPLICATION METRICS LOGS
+  # ===========================================
+  - job_name: metrics-logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: metrics-logs
+          service: trading-bot
+          log_type: metrics
+          __path__: /var/log/trading-bot/metrics/*.log
+
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            metric_name: metric_name
+            metric_value: metric_value
+            labels: labels
+            component: component
+      - timestamp:
+          format: RFC3339
+          source: timestamp
+      - labels:
+          metric_name:
+          component:
+          service:
+          log_type:
+
+  # ===========================================
+  # AUDIT LOGS
+  # ===========================================
+  - job_name: audit-logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: audit-logs
+          service: trading-bot
+          log_type: audit
+          security: high
+          __path__: /var/log/trading-bot/audit/*.log
+
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            user_id: user_id
+            action: action
+            resource: resource
+            ip_address: ip_address
+            user_agent: user_agent
+            result: result
+            details: details
+      - timestamp:
+          format: RFC3339
+          source: timestamp
+      - labels:
+          action:
+          result:
+          service:
+          log_type:
+          security:
+          user_id:

@@ -122,7 +122,7 @@ export class SignalGenerator extends EventEmitter implements ISignalGenerator {
         request,
         result,
         strategyId: request.strategyId,
-        symbol: request.context.marketData.symbol,
+        symbol: request.context?.marketData?.symbol || 'unknown',
         metadata: {
           processingTime: performance.now() - startTime,
           signalsGenerated: result.signals.length
@@ -166,7 +166,7 @@ export class SignalGenerator extends EventEmitter implements ISignalGenerator {
         result: errorResult,
         error: error instanceof Error ? error : new Error(String(error)),
         strategyId: request.strategyId,
-        symbol: request.context.marketData.symbol,
+        symbol: request.context?.marketData?.symbol || 'unknown',
         metadata: { processingTime }
       });
       
@@ -667,7 +667,7 @@ export class SignalGenerator extends EventEmitter implements ISignalGenerator {
         generationContext: {
           strategyId,
           conditionsUsed: signal.conditions || [],
-          marketConditions: request.context.marketConditions,
+          marketConditions: request.context?.marketConditions || {},
           indicators: this.extractIndicatorValues(request.context)
         },
         lifecycle: {
@@ -992,8 +992,12 @@ export class SignalGenerator extends EventEmitter implements ISignalGenerator {
     return `Signal generated from condition ${conditionResult.conditionId} with confidence ${conditionResult.confidence}`;
   }
 
-  private extractIndicatorValues(context: StrategyContext): Record<string, number> {
+  private extractIndicatorValues(context: StrategyContext | null): Record<string, number> {
     const indicators: Record<string, number> = {};
+    
+    if (!context?.indicators) {
+      return indicators;
+    }
     
     if (context.indicators.rsi) {
       indicators.rsi = context.indicators.rsi;

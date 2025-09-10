@@ -1,0 +1,381 @@
+version: '3.8'
+
+networks:
+  security:
+    driver: bridge
+  frontend:
+    external: true
+  backend:
+    external: true
+
+volumes:
+  nginx_ssl_certs:
+    driver: local
+  fail2ban_data:
+    driver: local
+  waf_logs:
+    driver: local
+  crowdsec_data:
+    driver: local
+
+services:
+  # ===========================================
+  # NGINX WITH SECURITY HARDENING
+  # ===========================================
+  nginx-security:
+    image: nginx:1.25-alpine
+    container_name: trading-nginx-security
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - security
+      - frontend
+      - backend
+    volumes:
+      - ./nginx-security.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - ./html:/var/www/html:ro
+      - waf_logs:/var/log/nginx
+    environment:
+      - NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates
+      - NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/conf.d
+    depends_on:
+      - modsecurity
+    labels:
+      - "security=nginx"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ===========================================
+  # MODSECURITY WAF (Web Application Firewall)
+  # ===========================================
+  modsecurity:
+    image: owasp/modsecurity-crs:3.3.5-nginx
+    container_name: trading-modsecurity
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    networks:
+      - security
+      - backend
+    volumes:
+      - ./modsecurity/modsec-config:/etc/modsecurity.d:ro
+      - ./modsecurity/crs-setup.conf:/etc/modsecurity.d/crs/crs-setup.conf:ro
+      - ./modsecurity/custom-rules:/opt/owasp-crs/rules/custom:ro
+      - waf_logs:/var/log/nginx
+    environment:
+      - BACKEND=http://backend:3001
+      - PARANOIA=2
+      - ANOMALY_INBOUND=5
+      - ANOMALY_OUTBOUND=4
+      - BLOCKING_PARANOIA=2
+      - MODSEC_RULE_ENGINE=On
+      - MODSEC_REQ_BODY_ACCESS=On
+      - MODSEC_REQ_BODY_LIMIT=13107200
+      - MODSEC_RESP_BODY_ACCESS=On
+      - MODSEC_RESP_BODY_LIMIT=524288
+      - MODSEC_AUDIT_ENGINE=RelevantOnly
+      - MODSEC_AUDIT_LOG_FORMAT=JSON
+      - MODSEC_AUDIT_STORAGE=/var/log/nginx/modsec_audit.log
+    labels:
+      - "security=waf"
+
+  # ===========================================
+  # CROWDSEC - COLLABORATIVE SECURITY
+  # ===========================================
+  crowdsec:
+    image: crowdsecurity/crowdsec:v1.5.6
+    container_name: trading-crowdsec
+    restart: unless-stopped
+    networks:
+      - security
+    volumes:
+      - crowdsec_data:/var/lib/crowdsec/data
+      - ./crowdsec/config:/etc/crowdsec:ro
+      - waf_logs:/var/log/nginx:ro
+      - /var/log:/var/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - COLLECTIONS=crowdsecurity/nginx crowdsecurity/base-http-scenarios crowdsecurity/whitelist-good-actors
+      - CUSTOM_HOSTNAME=trading-bot
+      - PGID=1000
+    labels:
+      - "security=crowdsec"
+    command: >
+      sh -c "
+      cscli collections install crowdsecurity/nginx &&
+      cscli collections install crowdsecurity/base-http-scenarios &&
+      cscli collections install crowdsecurity/whitelist-good-actors &&
+      crowdsec
+      "
+
+  # ===========================================
+  # CROWDSEC BOUNCER (NGINX INTEGRATION)
+  # ===========================================
+  crowdsec-bouncer:
+    image: fbonalair/traefik-crowdsec-bouncer:0.4.1
+    container_name: trading-crowdsec-bouncer
+    restart: unless-stopped
+    networks:
+      - security
+    environment:
+      - CROWDSEC_BOUNCER_API_KEY=${CROWDSEC_BOUNCER_API_KEY:-your_bouncer_key}
+      - CROWDSEC_AGENT_HOST=crowdsec:8080
+      - PORT=3001
+    depends_on:
+      - crowdsec
+    labels:
+      - "security=bouncer"
+
+  # ===========================================
+  # FAIL2BAN - INTRUSION PREVENTION
+  # ===========================================
+  fail2ban:
+    image: crazymax/fail2ban:1.0.2
+    container_name: trading-fail2ban
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - fail2ban_data:/data
+      - ./fail2ban:/etc/fail2ban:ro
+      - waf_logs:/var/log/nginx:ro
+      - /var/log:/var/log:ro
+    environment:
+      - TZ=UTC
+      - F2B_LOG_LEVEL=INFO
+      - F2B_DB_PURGE_AGE=30d
+    labels:
+      - "security=fail2ban"
+
+  # ===========================================
+  # SURICATA - NETWORK INTRUSION DETECTION
+  # ===========================================
+  suricata:
+    image: jasonish/suricata:6.0.13
+    container_name: trading-suricata
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+    volumes:
+      - ./suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
+      - ./suricata/rules:/var/lib/suricata/rules:ro
+      - ./logs/suricata:/var/log/suricata
+    environment:
+      - SURICATA_OPTIONS=-i eth0
+    labels:
+      - "security=ids"
+    command: >
+      sh -c "
+      suricata-update &&
+      suricata -c /etc/suricata/suricata.yaml -i eth0
+      "
+
+  # ===========================================
+  # VAULT - SECRETS MANAGEMENT
+  # ===========================================
+  vault:
+    image: vault:1.15.2
+    container_name: trading-vault
+    restart: unless-stopped
+    ports:
+      - "8200:8200"
+    networks:
+      - security
+    volumes:
+      - ./vault/config:/vault/config:ro
+      - ./vault/data:/vault/data
+      - ./vault/logs:/vault/logs
+    environment:
+      - VAULT_ADDR=http://127.0.0.1:8200
+      - VAULT_LOCAL_CONFIG={"backend":{"file":{"path":"/vault/data"}},"listener":{"tcp":{"address":"0.0.0.0:8200","tls_disable":true}},"ui":true}
+    cap_add:
+      - IPC_LOCK
+    labels:
+      - "security=vault"
+    command: vault server -config=/vault/config/vault.json
+
+  # ===========================================
+  # OAUTH2-PROXY - AUTHENTICATION LAYER
+  # ===========================================
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.4.0
+    container_name: trading-oauth2-proxy
+    restart: unless-stopped
+    ports:
+      - "4180:4180"
+    networks:
+      - security
+      - frontend
+    environment:
+      - OAUTH2_PROXY_PROVIDER=github
+      - OAUTH2_PROXY_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - OAUTH2_PROXY_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - OAUTH2_PROXY_COOKIE_SECRET=${OAUTH2_COOKIE_SECRET}
+      - OAUTH2_PROXY_UPSTREAM=http://nginx-security:80
+      - OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180
+      - OAUTH2_PROXY_REVERSE_PROXY=true
+      - OAUTH2_PROXY_EMAIL_DOMAINS=*
+      - OAUTH2_PROXY_SKIP_AUTH_REGEX=^/api/health$|^/metrics$|^/static/.*
+    labels:
+      - "security=auth"
+
+  # ===========================================
+  # CERTIFICATE MANAGER (Let's Encrypt)
+  # ===========================================
+  certbot:
+    image: certbot/certbot:v2.7.4
+    container_name: trading-certbot
+    restart: "no"
+    networks:
+      - security
+    volumes:
+      - nginx_ssl_certs:/etc/letsencrypt
+      - ./html:/var/www/certbot:ro
+    environment:
+      - CERTBOT_EMAIL=${SSL_EMAIL:-admin@tradingbot.com}
+    labels:
+      - "security=ssl"
+    profiles:
+      - ssl-generation
+
+  # ===========================================
+  # SECURITY SCANNER - VULNERABILITY ASSESSMENT
+  # ===========================================
+  trivy:
+    image: aquasec/trivy:0.48.0
+    container_name: trading-security-scanner
+    restart: "no"
+    networks:
+      - security
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./security/trivy-cache:/root/.cache/trivy
+      - ./security/reports:/reports
+    command: >
+      sh -c "
+      trivy image --format json --output /reports/trading-bot-scan.json trading-bot:latest &&
+      trivy fs --format json --output /reports/filesystem-scan.json /app
+      "
+    labels:
+      - "security=scanner"
+    profiles:
+      - security-scan
+
+  # ===========================================
+  # LOG ANALYSIS - SECURITY MONITORING
+  # ===========================================
+  goaccess:
+    image: allinurl/goaccess:1.7.3
+    container_name: trading-log-analyzer
+    restart: unless-stopped
+    ports:
+      - "7890:7890"
+    networks:
+      - security
+    volumes:
+      - waf_logs:/var/log/nginx:ro
+      - ./goaccess/goaccess.conf:/etc/goaccess/goaccess.conf:ro
+      - ./html/reports:/var/www/html/reports
+    environment:
+      - TZ=UTC
+    command: >
+      goaccess 
+      --config-file=/etc/goaccess/goaccess.conf 
+      --log-file=/var/log/nginx/access-security.log 
+      --output=/var/www/html/reports/index.html 
+      --real-time-html 
+      --ws-url=wss://your-domain.com:7890
+    labels:
+      - "security=analytics"
+
+  # ===========================================
+  # NETWORK SECURITY MONITOR
+  # ===========================================
+  ntopng:
+    image: ntop/ntopng:5.4
+    container_name: trading-network-monitor
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    networks:
+      - security
+    volumes:
+      - ./ntopng/conf:/etc/ntopng/ntopng.conf:ro
+      - ./ntopng/data:/var/lib/ntopng
+    environment:
+      - TZ=UTC
+    command: >
+      ntopng 
+      -d /var/lib/ntopng 
+      -i eth0 
+      -w 3000 
+      --disable-login
+    labels:
+      - "security=network-monitor"
+    profiles:
+      - network-monitoring
+
+  # ===========================================
+  # SECURITY ORCHESTRATION
+  # ===========================================
+  security-orchestrator:
+    build:
+      context: ./security-orchestrator
+      dockerfile: Dockerfile
+    container_name: trading-security-orchestrator
+    restart: unless-stopped
+    networks:
+      - security
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./security/config:/app/config:ro
+      - ./security/logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - CROWDSEC_API_URL=http://crowdsec:8080
+      - SLACK_WEBHOOK_URL=${SECURITY_SLACK_WEBHOOK}
+    depends_on:
+      - vault
+      - crowdsec
+    labels:
+      - "security=orchestrator"
+
+  # ===========================================
+  # BACKUP ENCRYPTION SERVICE
+  # ===========================================
+  backup-encryption:
+    image: alpine:3.18
+    container_name: trading-backup-encryption
+    restart: "no"
+    networks:
+      - security
+    volumes:
+      - ./backups:/backups
+      - ./security/keys:/keys:ro
+    environment:
+      - BACKUP_PASSPHRASE=${BACKUP_PASSPHRASE}
+    command: >
+      sh -c "
+      apk add --no-cache gnupg &&
+      find /backups -name '*.sql' -exec gpg --batch --yes --passphrase=$$BACKUP_PASSPHRASE --symmetric --cipher-algo AES256 {} \; &&
+      find /backups -name '*.sql' -not -name '*.gpg' -delete
+      "
+    labels:
+      - "security=encryption"
+    profiles:
+      - backup-encryption

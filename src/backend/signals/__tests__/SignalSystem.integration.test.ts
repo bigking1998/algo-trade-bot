@@ -299,7 +299,7 @@ describe('Signal System Integration', () => {
       // Check history for both strategies
       for (const strategy of strategies) {
         const history = await signalSystem.historyManager.getSignalHistory(strategy.id);
-        expect(history.length).toBeGreaterThanOrEqualTo(0);
+        expect(history.length).toBeGreaterThanOrEqual(0);
       }
     });
   });
@@ -387,7 +387,7 @@ describe('Signal System Integration', () => {
       await new Promise(resolve => setTimeout(resolve, 500));
 
       const metrics = processor.getPerformanceMetrics();
-      expect(metrics.marketDataUpdatesPerSecond).toBeGreaterThanOrEqualTo(0);
+      expect(metrics.marketDataUpdatesPerSecond).toBeGreaterThanOrEqual(0);
 
       await processor.stopProcessing();
     });
@@ -560,9 +560,9 @@ describe('Signal System Integration', () => {
       const processorMetrics = signalSystem.realTimeProcessor.getPerformanceMetrics();
 
       expect(generatorHealth.healthy).toBe(true);
-      expect(generatorHealth.score).toBeGreaterThanOrEqualTo(70);
-      expect(processorMetrics.requestsPerSecond).toBeGreaterThanOrEqualTo(0);
-      expect(processorMetrics.averageLatency).toBeGreaterThanOrEqualTo(0);
+      expect(generatorHealth.score).toBeGreaterThanOrEqual(70);
+      expect(processorMetrics.requestsPerSecond).toBeGreaterThanOrEqual(0);
+      expect(processorMetrics.averageLatency).toBeGreaterThanOrEqual(0);
     });
 
     it('should detect and handle system stress', async () => {

@@ -1,0 +1,567 @@
+name: 'Trading Bot CI/CD Pipeline'
+
+on:
+  push:
+    branches: [main, develop, 'feature/*', 'hotfix/*']
+  pull_request:
+    branches: [main, develop]
+  release:
+    types: [published]
+
+env:
+  NODE_VERSION: '18.x'
+  DOCKER_REGISTRY: 'ghcr.io'
+  IMAGE_NAME: 'trading-bot'
+  POSTGRES_VERSION: '15'
+
+jobs:
+  # ===========================================
+  # CODE QUALITY & SECURITY CHECKS
+  # ===========================================
+  code-quality:
+    name: 'Code Quality & Security'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci --prefer-offline --no-audit
+          npm ls --depth=0
+
+      - name: Run ESLint
+        run: |
+          npm run lint
+          npm run lint:report || true
+        continue-on-error: true
+
+      - name: Run TypeScript check
+        run: |
+          npm run type-check
+          npx tsc --noEmit --project tsconfig.json
+
+      - name: Run Prettier format check
+        run: |
+          npx prettier --check "src/**/*.{ts,tsx,js,jsx,json,md}"
+
+      - name: Security audit
+        run: |
+          npm audit --audit-level=moderate
+          npm audit --parseable | grep -v "ELOCKVERIFY" || true
+
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+      - name: Upload ESLint results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eslint-results
+          path: eslint-results.json
+          retention-days: 7
+
+  # ===========================================
+  # UNIT & INTEGRATION TESTS
+  # ===========================================
+  test:
+    name: 'Unit & Integration Tests'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [code-quality]
+    
+    services:
+      postgres:
+        image: timescale/timescaledb:2.11.2-pg15
+        env:
+          POSTGRES_DB: trading_bot_test
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          TIMESCALEDB_TELEMETRY: off
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Setup test database
+        run: |
+          npm run db:migrate:test
+          npm run db:seed:test
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/trading_bot_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+
+      - name: Run unit tests
+        run: |
+          npm run test:unit -- --coverage --maxWorkers=2
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/trading_bot_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+
+      - name: Run integration tests
+        run: |
+          npm run test:integration -- --coverage --maxWorkers=1
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/trading_bot_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+
+      - name: Run API tests
+        run: |
+          npm run test:api
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/trading_bot_test
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/coverage-final.json
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            coverage/
+            test-results.xml
+          retention-days: 7
+
+  # ===========================================
+  # BUILD & CONTAINERIZATION
+  # ===========================================
+  build:
+    name: 'Build & Containerize'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test]
+    
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+
+      - name: Build application
+        run: |
+          npm run build
+          npm run build:frontend
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.production
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+  # ===========================================
+  # SECURITY SCANNING
+  # ===========================================
+  security-scan:
+    name: 'Security Scanning'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [build]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.build.outputs.image-tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run Snyk to check for vulnerabilities
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+  # ===========================================
+  # PERFORMANCE TESTING
+  # ===========================================
+  performance-test:
+    name: 'Performance Testing'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+
+      - name: Run performance tests
+        run: |
+          k6 run --out json=performance-results.json ./tests/performance/load-test.js
+        env:
+          TARGET_URL: http://localhost:3001
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: performance-results.json
+          retention-days: 7
+
+  # ===========================================
+  # DEPLOYMENT TO STAGING
+  # ===========================================
+  deploy-staging:
+    name: 'Deploy to Staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [build, security-scan]
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging.trading-bot.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure kubeconfig
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+          export KUBECONFIG=kubeconfig
+
+      - name: Deploy to staging
+        run: |
+          envsubst < k8s/staging/deployment.yaml | kubectl apply -f -
+          kubectl rollout status deployment/trading-bot-staging -n staging
+        env:
+          IMAGE_TAG: ${{ needs.build.outputs.image-tag }}
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          REDIS_URL: ${{ secrets.STAGING_REDIS_URL }}
+
+      - name: Run smoke tests
+        run: |
+          npm ci
+          npm run test:smoke -- --env=staging
+        env:
+          STAGING_URL: https://staging.trading-bot.com
+
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  # ===========================================
+  # DEPLOYMENT TO PRODUCTION
+  # ===========================================
+  deploy-production:
+    name: 'Deploy to Production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [build, security-scan, performance-test]
+    if: github.event_name == 'release' && github.event.action == 'published'
+    environment:
+      name: production
+      url: https://trading-bot.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure kubeconfig
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > kubeconfig
+          export KUBECONFIG=kubeconfig
+
+      - name: Create database backup
+        run: |
+          kubectl exec deployment/postgres-production -n production -- pg_dump -U $DB_USER -d $DB_NAME > backup-pre-deploy-$(date +%Y%m%d-%H%M%S).sql
+        env:
+          DB_USER: ${{ secrets.PROD_DB_USER }}
+          DB_NAME: ${{ secrets.PROD_DB_NAME }}
+
+      - name: Deploy to production (Blue-Green)
+        run: |
+          # Deploy to green environment
+          envsubst < k8s/production/deployment-green.yaml | kubectl apply -f -
+          kubectl rollout status deployment/trading-bot-green -n production
+          
+          # Run health checks
+          kubectl wait --for=condition=available --timeout=300s deployment/trading-bot-green -n production
+          
+          # Switch traffic to green
+          kubectl patch service trading-bot-service -n production -p '{"spec":{"selector":{"version":"green"}}}'
+          
+          # Wait and verify
+          sleep 30
+          
+          # Scale down blue environment
+          kubectl scale deployment trading-bot-blue -n production --replicas=0
+        env:
+          IMAGE_TAG: ${{ needs.build.outputs.image-tag }}
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          REDIS_URL: ${{ secrets.PROD_REDIS_URL }}
+
+      - name: Run production smoke tests
+        run: |
+          npm ci
+          npm run test:smoke -- --env=production
+        env:
+          PRODUCTION_URL: https://trading-bot.com
+
+      - name: Update monitoring dashboards
+        run: |
+          curl -X POST "${{ secrets.GRAFANA_API_URL }}/api/annotations" \
+            -H "Authorization: Bearer ${{ secrets.GRAFANA_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "text": "Production deployment: ${{ github.event.release.tag_name }}",
+              "tags": ["deployment", "production"],
+              "time": ${{ github.event.head_commit.timestamp }}
+            }'
+
+      - name: Notify success
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          channel: '#deployments'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          custom_payload: |
+            {
+              "text": "🚀 Production deployment successful!",
+              "attachments": [{
+                "color": "good",
+                "fields": [{
+                  "title": "Version",
+                  "value": "${{ github.event.release.tag_name }}",
+                  "short": true
+                }, {
+                  "title": "Environment",
+                  "value": "Production",
+                  "short": true
+                }, {
+                  "title": "URL",
+                  "value": "https://trading-bot.com",
+                  "short": true
+                }]
+              }]
+            }
+
+  # ===========================================
+  # ROLLBACK CAPABILITY
+  # ===========================================
+  rollback:
+    name: 'Rollback Deployment'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: failure() && (github.ref == 'refs/heads/main' || github.event_name == 'release')
+    needs: [deploy-staging, deploy-production]
+    
+    steps:
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure kubeconfig
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+            export NAMESPACE=staging
+          else
+            echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > kubeconfig
+            export NAMESPACE=production
+          fi
+          export KUBECONFIG=kubeconfig
+
+      - name: Rollback deployment
+        run: |
+          kubectl rollout undo deployment/trading-bot-${{ github.ref == 'refs/heads/main' && 'staging' || 'production' }} -n $NAMESPACE
+          kubectl rollout status deployment/trading-bot-${{ github.ref == 'refs/heads/main' && 'staging' || 'production' }} -n $NAMESPACE
+
+      - name: Notify rollback
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#deployments'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          custom_payload: |
+            {
+              "text": "⚠️ Deployment rollback executed!",
+              "attachments": [{
+                "color": "danger",
+                "fields": [{
+                  "title": "Environment",
+                  "value": "${{ github.ref == 'refs/heads/main' && 'Staging' || 'Production' }}",
+                  "short": true
+                }, {
+                  "title": "Reason",
+                  "value": "Deployment failure detected",
+                  "short": true
+                }]
+              }]
+            }
+
+  # ===========================================
+  # POST-DEPLOYMENT VERIFICATION
+  # ===========================================
+  post-deployment:
+    name: 'Post-Deployment Verification'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [deploy-production]
+    if: github.event_name == 'release' && github.event.action == 'published'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run comprehensive health checks
+        run: |
+          npm run test:health-check -- --env=production
+          npm run test:api-integration -- --env=production
+        env:
+          PRODUCTION_URL: https://trading-bot.com
+          HEALTH_CHECK_TIMEOUT: 300
+
+      - name: Generate deployment report
+        run: |
+          echo "# Deployment Report" > deployment-report.md
+          echo "- **Version**: ${{ github.event.release.tag_name }}" >> deployment-report.md
+          echo "- **Deployed**: $(date)" >> deployment-report.md
+          echo "- **Environment**: Production" >> deployment-report.md
+          echo "- **Status**: ✅ Successful" >> deployment-report.md
+
+      - name: Upload deployment report
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-report
+          path: deployment-report.md
+          retention-days: 30

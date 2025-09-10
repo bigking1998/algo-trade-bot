@@ -7,7 +7,7 @@
  */
 
 import type { Order, OrderStatus, OrderType, OrderSide, TimeInForce } from '../execution/OrderExecutor.js';
-import type { MarketDataPoint } from '../streaming/types.js';
+// import type { MarketDataPoint } from '../streaming/types.js';
 
 /**
  * Supported Exchange Identifiers
@@ -488,22 +488,4 @@ export interface ExchangeConnectionPool {
   lastHealthCheck: Date;
 }
 
-export default {
-  ExchangeId,
-  ExchangeStatus,
-  ExchangeCapabilities,
-  ExchangeRateLimits,
-  ExchangeConfig,
-  UnifiedMarketData,
-  UnifiedOrderBook,
-  ExchangeOrder,
-  ExchangeBalance,
-  ExchangeTradingFees,
-  ExchangeHealth,
-  ArbitrageOpportunity,
-  CrossExchangePortfolio,
-  ExchangeEvent,
-  ExchangePerformanceMetrics,
-  OrderRoutingStrategy,
-  ExchangeConnectionPool
-};
+// Default export removed - only type exports needed

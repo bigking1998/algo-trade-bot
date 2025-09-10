@@ -1,0 +1,569 @@
+# ===========================================
+# DISASTER RECOVERY PLAN
+# DO-007: Comprehensive Backup and Recovery Strategy
+# ===========================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-config
+  namespace: trading-bot
+data:
+  BACKUP_SCHEDULE: "0 2 * * *"  # Daily at 2 AM
+  BACKUP_RETENTION_DAYS: "30"
+  BACKUP_S3_BUCKET: "trading-bot-backups"
+  BACKUP_ENCRYPTION: "true"
+  FULL_BACKUP_SCHEDULE: "0 1 * * 0"  # Weekly full backup on Sunday 1 AM
+
+---
+# Database Backup CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: trading-bot
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM UTC
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          containers:
+          - name: postgres-backup
+            image: postgres:15-alpine
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              export PGPASSWORD=$POSTGRES_PASSWORD
+              
+              TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+              BACKUP_FILE="trading_bot_backup_${TIMESTAMP}.sql"
+              BACKUP_PATH="/backups/${BACKUP_FILE}"
+              
+              echo "Starting backup at $(date)"
+              
+              # Create database dump
+              pg_dump -h $POSTGRES_HOST -U $POSTGRES_USER -d $POSTGRES_DB \
+                --verbose --format=custom --compress=9 \
+                --file="${BACKUP_PATH}"
+              
+              # Verify backup
+              if [ ! -f "${BACKUP_PATH}" ]; then
+                echo "ERROR: Backup file not created"
+                exit 1
+              fi
+              
+              BACKUP_SIZE=$(stat -f%z "${BACKUP_PATH}" 2>/dev/null || stat -c%s "${BACKUP_PATH}")
+              if [ $BACKUP_SIZE -lt 1024 ]; then
+                echo "ERROR: Backup file too small ($BACKUP_SIZE bytes)"
+                exit 1
+              fi
+              
+              # Encrypt backup
+              if [ "$BACKUP_ENCRYPTION" = "true" ]; then
+                gpg --batch --yes --cipher-algo AES256 --compress-algo 1 \
+                  --passphrase "${BACKUP_PASSPHRASE}" \
+                  --symmetric "${BACKUP_PATH}"
+                rm "${BACKUP_PATH}"
+                BACKUP_PATH="${BACKUP_PATH}.gpg"
+              fi
+              
+              # Upload to S3
+              aws s3 cp "${BACKUP_PATH}" "s3://${BACKUP_S3_BUCKET}/postgres/" \
+                --storage-class STANDARD_IA \
+                --server-side-encryption AES256
+              
+              # Create backup metadata
+              cat > "/backups/metadata_${TIMESTAMP}.json" << EOF
+              {
+                "timestamp": "${TIMESTAMP}",
+                "database": "${POSTGRES_DB}",
+                "backup_file": "${BACKUP_FILE}",
+                "size_bytes": ${BACKUP_SIZE},
+                "encrypted": ${BACKUP_ENCRYPTION},
+                "s3_path": "s3://${BACKUP_S3_BUCKET}/postgres/${BACKUP_FILE}",
+                "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              }
+              EOF
+              
+              aws s3 cp "/backups/metadata_${TIMESTAMP}.json" \
+                "s3://${BACKUP_S3_BUCKET}/metadata/"
+              
+              # Clean up old local backups
+              find /backups -name "trading_bot_backup_*.sql*" -mtime +1 -delete
+              find /backups -name "metadata_*.json" -mtime +1 -delete
+              
+              # Clean up old S3 backups
+              aws s3api list-objects-v2 \
+                --bucket "${BACKUP_S3_BUCKET}" \
+                --prefix "postgres/" \
+                --query "Contents[?LastModified<='$(date -d '${BACKUP_RETENTION_DAYS} days ago' -u +%Y-%m-%dT%H:%M:%SZ)'].Key" \
+                --output text | xargs -I {} aws s3 rm "s3://${BACKUP_S3_BUCKET}/{}"
+              
+              echo "Backup completed successfully at $(date)"
+              
+              # Send notification
+              curl -X POST "$SLACK_WEBHOOK" -H 'Content-type: application/json' \
+                --data "{\"text\":\"✅ Database backup completed: ${BACKUP_FILE} ($(echo $BACKUP_SIZE | numfmt --to=iec))\"}"
+              
+            env:
+            - name: POSTGRES_HOST
+              value: "postgres-primary-0.postgres-primary.trading-bot.svc.cluster.local"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: password
+            - name: POSTGRES_DB
+              value: "trading_bot"
+            - name: BACKUP_PASSPHRASE
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secret
+                  key: passphrase
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secret
+                  key: access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secret
+                  key: secret-access-key
+            - name: BACKUP_S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: backup-config
+                  key: BACKUP_S3_BUCKET
+            - name: BACKUP_ENCRYPTION
+              valueFrom:
+                configMapKeyRef:
+                  name: backup-config
+                  key: BACKUP_ENCRYPTION
+            - name: BACKUP_RETENTION_DAYS
+              valueFrom:
+                configMapKeyRef:
+                  name: backup-config
+                  key: BACKUP_RETENTION_DAYS
+            - name: SLACK_WEBHOOK
+              valueFrom:
+                secretKeyRef:
+                  name: notification-secret
+                  key: slack-webhook
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backups
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "100m"
+              limits:
+                memory: "1Gi"
+                cpu: "500m"
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-storage
+          restartPolicy: OnFailure
+
+---
+# Redis Backup CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: redis-backup
+  namespace: trading-bot
+spec:
+  schedule: "30 2 * * *"  # Daily at 2:30 AM UTC
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: redis-backup
+            image: redis:7-alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+              BACKUP_FILE="redis_backup_${TIMESTAMP}.rdb"
+              
+              # Create Redis backup
+              redis-cli -h redis-cluster-0.redis-cluster.trading-bot.svc.cluster.local \
+                --rdb "/backups/${BACKUP_FILE}"
+              
+              # Compress backup
+              gzip "/backups/${BACKUP_FILE}"
+              
+              # Upload to S3
+              aws s3 cp "/backups/${BACKUP_FILE}.gz" \
+                "s3://${BACKUP_S3_BUCKET}/redis/" \
+                --storage-class STANDARD_IA
+              
+              # Clean up
+              rm "/backups/${BACKUP_FILE}.gz"
+              
+              echo "Redis backup completed: ${BACKUP_FILE}"
+            env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secret
+                  key: access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secret
+                  key: secret-access-key
+            - name: BACKUP_S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: backup-config
+                  key: BACKUP_S3_BUCKET
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backups
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-storage
+          restartPolicy: OnFailure
+
+---
+# Application Configuration Backup
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: config-backup
+  namespace: trading-bot
+spec:
+  schedule: "0 3 * * 0"  # Weekly on Sunday at 3 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: backup-service-account
+          containers:
+          - name: config-backup
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+              BACKUP_DIR="/backups/config_${TIMESTAMP}"
+              mkdir -p "${BACKUP_DIR}"
+              
+              # Backup ConfigMaps
+              kubectl get configmaps -n trading-bot -o yaml > "${BACKUP_DIR}/configmaps.yaml"
+              
+              # Backup Secrets (without values for security)
+              kubectl get secrets -n trading-bot -o yaml | \
+                sed 's/data:/# data:/g' > "${BACKUP_DIR}/secrets-structure.yaml"
+              
+              # Backup Deployments
+              kubectl get deployments -n trading-bot -o yaml > "${BACKUP_DIR}/deployments.yaml"
+              
+              # Backup Services
+              kubectl get services -n trading-bot -o yaml > "${BACKUP_DIR}/services.yaml"
+              
+              # Backup Ingress
+              kubectl get ingress -n trading-bot -o yaml > "${BACKUP_DIR}/ingress.yaml" 2>/dev/null || true
+              
+              # Create archive
+              tar -czf "/backups/config_backup_${TIMESTAMP}.tar.gz" -C /backups "config_${TIMESTAMP}"
+              
+              # Upload to S3
+              aws s3 cp "/backups/config_backup_${TIMESTAMP}.tar.gz" \
+                "s3://${BACKUP_S3_BUCKET}/config/"
+              
+              # Clean up
+              rm -rf "${BACKUP_DIR}" "/backups/config_backup_${TIMESTAMP}.tar.gz"
+              
+              echo "Configuration backup completed"
+            env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secret
+                  key: access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secret
+                  key: secret-access-key
+            - name: BACKUP_S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: backup-config
+                  key: BACKUP_S3_BUCKET
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backups
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: backup-storage
+          restartPolicy: OnFailure
+
+---
+# Persistent Volume for backups
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-storage
+  namespace: trading-bot
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: ssd
+
+---
+# Service Account for backup operations
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backup-service-account
+  namespace: trading-bot
+
+---
+# Role for backup service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: trading-bot
+  name: backup-role
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets", "services", "persistentvolumeclaims"]
+  verbs: ["get", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "replicasets"]
+  verbs: ["get", "list"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list"]
+
+---
+# Role binding for backup service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: backup-role-binding
+  namespace: trading-bot
+subjects:
+- kind: ServiceAccount
+  name: backup-service-account
+  namespace: trading-bot
+roleRef:
+  kind: Role
+  name: backup-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Backup verification job
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-verification
+  namespace: trading-bot
+spec:
+  schedule: "0 4 * * *"  # Daily at 4 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: backup-verification
+            image: postgres:15-alpine
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "Starting backup verification at $(date)"
+              
+              # Get latest backup
+              LATEST_BACKUP=$(aws s3 ls "s3://${BACKUP_S3_BUCKET}/postgres/" | \
+                grep "\.sql" | sort | tail -n 1 | awk '{print $4}')
+              
+              if [ -z "$LATEST_BACKUP" ]; then
+                echo "ERROR: No backup found"
+                exit 1
+              fi
+              
+              echo "Verifying backup: $LATEST_BACKUP"
+              
+              # Download and verify backup
+              aws s3 cp "s3://${BACKUP_S3_BUCKET}/postgres/${LATEST_BACKUP}" \
+                "/tmp/${LATEST_BACKUP}"
+              
+              if [[ "$LATEST_BACKUP" == *.gpg ]]; then
+                # Decrypt backup
+                gpg --batch --yes --passphrase "${BACKUP_PASSPHRASE}" \
+                  --decrypt "/tmp/${LATEST_BACKUP}" > "/tmp/backup.sql"
+                BACKUP_FILE="/tmp/backup.sql"
+              else
+                BACKUP_FILE="/tmp/${LATEST_BACKUP}"
+              fi
+              
+              # Test restore to temporary database
+              export PGPASSWORD=$POSTGRES_PASSWORD
+              createdb -h $POSTGRES_HOST -U $POSTGRES_USER backup_test_$(date +%s)
+              TEST_DB="backup_test_$(date +%s)"
+              
+              pg_restore -h $POSTGRES_HOST -U $POSTGRES_USER -d $TEST_DB \
+                --verbose "$BACKUP_FILE"
+              
+              # Verify tables exist
+              TABLE_COUNT=$(psql -h $POSTGRES_HOST -U $POSTGRES_USER -d $TEST_DB \
+                -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'")
+              
+              if [ "$TABLE_COUNT" -lt 5 ]; then
+                echo "ERROR: Backup verification failed - insufficient tables ($TABLE_COUNT)"
+                exit 1
+              fi
+              
+              # Clean up test database
+              dropdb -h $POSTGRES_HOST -U $POSTGRES_USER $TEST_DB
+              rm -f "/tmp/${LATEST_BACKUP}" "$BACKUP_FILE"
+              
+              echo "Backup verification completed successfully"
+              
+              # Send notification
+              curl -X POST "$SLACK_WEBHOOK" -H 'Content-type: application/json' \
+                --data "{\"text\":\"✅ Backup verification successful: ${LATEST_BACKUP}\"}"
+              
+            env:
+            - name: POSTGRES_HOST
+              value: "postgres-primary-0.postgres-primary.trading-bot.svc.cluster.local"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: password
+            - name: BACKUP_PASSPHRASE
+              valueFrom:
+                secretKeyRef:
+                  name: backup-secret
+                  key: passphrase
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secret
+                  key: access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secret
+                  key: secret-access-key
+            - name: BACKUP_S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: backup-config
+                  key: BACKUP_S3_BUCKET
+            - name: SLACK_WEBHOOK
+              valueFrom:
+                secretKeyRef:
+                  name: notification-secret
+                  key: slack-webhook
+          restartPolicy: OnFailure
+
+---
+# Disaster Recovery Runbook ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: disaster-recovery-runbook
+  namespace: trading-bot
+data:
+  recovery-procedures.md: |
+    # Disaster Recovery Procedures
+    
+    ## Database Recovery
+    
+    1. **Identify backup to restore:**
+       ```bash
+       aws s3 ls s3://trading-bot-backups/postgres/ | sort
+       ```
+    
+    2. **Download backup:**
+       ```bash
+       aws s3 cp s3://trading-bot-backups/postgres/[BACKUP_FILE] ./backup.sql.gpg
+       ```
+    
+    3. **Decrypt backup (if encrypted):**
+       ```bash
+       gpg --decrypt backup.sql.gpg > backup.sql
+       ```
+    
+    4. **Restore database:**
+       ```bash
+       pg_restore -h [HOST] -U [USER] -d [DATABASE] backup.sql
+       ```
+    
+    ## Redis Recovery
+    
+    1. **Stop Redis service:**
+       ```bash
+       kubectl scale statefulset redis-cluster --replicas=0 -n trading-bot
+       ```
+    
+    2. **Download and extract backup:**
+       ```bash
+       aws s3 cp s3://trading-bot-backups/redis/[BACKUP_FILE] ./redis_backup.rdb.gz
+       gunzip redis_backup.rdb.gz
+       ```
+    
+    3. **Copy to Redis data directory and restart:**
+       ```bash
+       kubectl cp redis_backup.rdb redis-cluster-0:/data/dump.rdb -n trading-bot
+       kubectl scale statefulset redis-cluster --replicas=6 -n trading-bot
+       ```
+    
+    ## Application Recovery
+    
+    1. **Apply configuration backup:**
+       ```bash
+       aws s3 cp s3://trading-bot-backups/config/[CONFIG_BACKUP] ./config.tar.gz
+       tar -xzf config.tar.gz
+       kubectl apply -f config_*/
+       ```
+    
+    2. **Rolling restart:**
+       ```bash
+       kubectl rollout restart deployment/trading-bot-backend -n trading-bot
+       ```
+    
+    ## Emergency Contacts
+    - Primary: admin@tradingbot.com
+    - Secondary: devops@tradingbot.com
+    - Slack: #emergency-response
+    
+    ## RTO/RPO Targets
+    - RTO (Recovery Time Objective): 4 hours
+    - RPO (Recovery Point Objective): 1 hour

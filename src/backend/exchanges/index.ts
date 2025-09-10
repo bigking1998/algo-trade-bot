@@ -11,6 +11,15 @@
  */
 
 // Core framework components
+import { MultiExchangeFramework } from './MultiExchangeFramework.js';
+import { ArbitrageEngine } from './ArbitrageEngine.js';
+import { ExchangeRouter } from './ExchangeRouter.js';
+import { BinanceConnector } from './connectors/BinanceConnector.js';
+import { CoinbaseConnector } from './connectors/CoinbaseConnector.js';
+import { KrakenConnector } from './connectors/KrakenConnector.js';
+import { BybitConnector } from './connectors/BybitConnector.js';
+import { OKXConnector } from './connectors/OKXConnector.js';
+
 export { MultiExchangeFramework } from './MultiExchangeFramework.js';
 export { BaseExchangeConnector } from './BaseExchangeConnector.js';
 export { ArbitrageEngine } from './ArbitrageEngine.js';
@@ -19,6 +28,9 @@ export { ExchangeRouter } from './ExchangeRouter.js';
 // Exchange connectors
 export { BinanceConnector } from './connectors/BinanceConnector.js';
 export { CoinbaseConnector } from './connectors/CoinbaseConnector.js';
+export { KrakenConnector } from './connectors/KrakenConnector.js';
+export { BybitConnector } from './connectors/BybitConnector.js';
+export { OKXConnector } from './connectors/OKXConnector.js';
 
 // Type definitions
 export type * from './types.js';
@@ -186,6 +198,247 @@ export const DEFAULT_EXCHANGE_CONFIGS = {
       USDC: 5000000
     },
     enableRiskChecks: true
+  },
+  
+  kraken: {
+    exchangeId: 'kraken' as const,
+    name: 'Kraken',
+    enabled: true,
+    apiUrl: 'https://api.kraken.com',
+    websocketUrl: 'wss://ws.kraken.com',
+    capabilities: {
+      spotTrading: true,
+      marginTrading: true,
+      futuresTrading: true,
+      optionsTrading: false,
+      marketOrders: true,
+      limitOrders: true,
+      stopOrders: true,
+      stopLimitOrders: true,
+      icebergOrders: false,
+      postOnlyOrders: true,
+      websocketStreams: true,
+      restAPI: true,
+      sandboxMode: false,
+      testnetSupport: false,
+      realtimeOrderBook: true,
+      realtimeTrades: true,
+      realtimeCandles: true,
+      realtimeTickers: true,
+      maxOrderSize: 1000000,
+      minOrderSize: 0.0001,
+      maxOrdersPerSecond: 1,
+      maxConcurrentOrders: 80
+    },
+    rateLimits: {
+      restRequests: {
+        limit: 15,
+        windowMs: 1000
+      },
+      websocketConnections: {
+        maxConnections: 2,
+        maxSubscriptions: 50,
+        reconnectDelayMs: 5000
+      },
+      orderPlacement: {
+        limit: 60,
+        windowMs: 60000
+      },
+      marketData: {
+        limit: 1,
+        windowMs: 1000
+      }
+    },
+    priority: 80,
+    healthCheckInterval: 30000,
+    reconnectAttempts: 3,
+    reconnectDelayMs: 5000,
+    defaultTradingPair: 'BTC/USD',
+    supportedAssets: ['BTC', 'ETH', 'ADA', 'USD', 'EUR'],
+    minimumBalance: {
+      BTC: 0.0005,
+      ETH: 0.005,
+      ADA: 1,
+      USD: 5,
+      EUR: 5
+    },
+    maxPositionSize: {
+      BTC: 100,
+      ETH: 1000,
+      ADA: 100000,
+      USD: 500000,
+      EUR: 500000
+    },
+    maxDailyVolume: {
+      BTC: 500,
+      ETH: 5000,
+      ADA: 500000,
+      USD: 2500000,
+      EUR: 2500000
+    },
+    enableRiskChecks: true
+  },
+  
+  bybit: {
+    exchangeId: 'bybit' as const,
+    name: 'Bybit',
+    enabled: true,
+    apiUrl: 'https://api.bybit.com',
+    websocketUrl: 'wss://stream.bybit.com',
+    sandboxApiUrl: 'https://api-testnet.bybit.com',
+    sandboxWebsocketUrl: 'wss://stream-testnet.bybit.com',
+    capabilities: {
+      spotTrading: true,
+      marginTrading: true,
+      futuresTrading: true,
+      optionsTrading: true,
+      marketOrders: true,
+      limitOrders: true,
+      stopOrders: true,
+      stopLimitOrders: true,
+      icebergOrders: false,
+      postOnlyOrders: true,
+      websocketStreams: true,
+      restAPI: true,
+      sandboxMode: true,
+      testnetSupport: true,
+      realtimeOrderBook: true,
+      realtimeTrades: true,
+      realtimeCandles: true,
+      realtimeTickers: true,
+      maxOrderSize: 1000000,
+      minOrderSize: 0.0001,
+      maxOrdersPerSecond: 50,
+      maxConcurrentOrders: 500
+    },
+    rateLimits: {
+      restRequests: {
+        limit: 600,
+        windowMs: 60000
+      },
+      websocketConnections: {
+        maxConnections: 10,
+        maxSubscriptions: 300,
+        reconnectDelayMs: 1000
+      },
+      orderPlacement: {
+        limit: 100,
+        windowMs: 5000
+      },
+      marketData: {
+        limit: 120,
+        windowMs: 1000
+      }
+    },
+    priority: 85,
+    healthCheckInterval: 30000,
+    reconnectAttempts: 5,
+    reconnectDelayMs: 1000,
+    defaultTradingPair: 'BTCUSDT',
+    supportedAssets: ['BTC', 'ETH', 'SOL', 'USDT', 'USDC'],
+    minimumBalance: {
+      BTC: 0.0001,
+      ETH: 0.001,
+      SOL: 0.1,
+      USDT: 1,
+      USDC: 1
+    },
+    maxPositionSize: {
+      BTC: 1000,
+      ETH: 10000,
+      SOL: 100000,
+      USDT: 10000000,
+      USDC: 10000000
+    },
+    maxDailyVolume: {
+      BTC: 5000,
+      ETH: 50000,
+      SOL: 500000,
+      USDT: 50000000,
+      USDC: 50000000
+    },
+    enableRiskChecks: true
+  },
+  
+  okx: {
+    exchangeId: 'okx' as const,
+    name: 'OKX',
+    enabled: true,
+    apiUrl: 'https://www.okx.com',
+    websocketUrl: 'wss://ws.okx.com:8443',
+    sandboxApiUrl: 'https://www.okx.com',
+    sandboxWebsocketUrl: 'wss://wspap.okx.com:8443',
+    capabilities: {
+      spotTrading: true,
+      marginTrading: true,
+      futuresTrading: true,
+      optionsTrading: true,
+      marketOrders: true,
+      limitOrders: true,
+      stopOrders: true,
+      stopLimitOrders: true,
+      icebergOrders: true,
+      postOnlyOrders: true,
+      websocketStreams: true,
+      restAPI: true,
+      sandboxMode: true,
+      testnetSupport: true,
+      realtimeOrderBook: true,
+      realtimeTrades: true,
+      realtimeCandles: true,
+      realtimeTickers: true,
+      maxOrderSize: 10000000,
+      minOrderSize: 0.00001,
+      maxOrdersPerSecond: 20,
+      maxConcurrentOrders: 300
+    },
+    rateLimits: {
+      restRequests: {
+        limit: 1200,
+        windowMs: 60000
+      },
+      websocketConnections: {
+        maxConnections: 5,
+        maxSubscriptions: 240,
+        reconnectDelayMs: 1000
+      },
+      orderPlacement: {
+        limit: 300,
+        windowMs: 5000
+      },
+      marketData: {
+        limit: 40,
+        windowMs: 2000
+      }
+    },
+    priority: 88,
+    healthCheckInterval: 30000,
+    reconnectAttempts: 5,
+    reconnectDelayMs: 1000,
+    defaultTradingPair: 'BTC-USDT',
+    supportedAssets: ['BTC', 'ETH', 'OKB', 'USDT', 'USDC'],
+    minimumBalance: {
+      BTC: 0.00001,
+      ETH: 0.0001,
+      OKB: 0.1,
+      USDT: 1,
+      USDC: 1
+    },
+    maxPositionSize: {
+      BTC: 10000,
+      ETH: 100000,
+      OKB: 1000000,
+      USDT: 100000000,
+      USDC: 100000000
+    },
+    maxDailyVolume: {
+      BTC: 50000,
+      ETH: 500000,
+      OKB: 5000000,
+      USDT: 500000000,
+      USDC: 500000000
+    },
+    enableRiskChecks: true
   }
 };
 
@@ -208,6 +461,27 @@ export function createCoinbaseConnector(config: any) {
   });
 }
 
+export function createKrakenConnector(config: any) {
+  return new KrakenConnector({
+    ...DEFAULT_EXCHANGE_CONFIGS.kraken,
+    ...config
+  });
+}
+
+export function createBybitConnector(config: any) {
+  return new BybitConnector({
+    ...DEFAULT_EXCHANGE_CONFIGS.bybit,
+    ...config
+  });
+}
+
+export function createOKXConnector(config: any) {
+  return new OKXConnector({
+    ...DEFAULT_EXCHANGE_CONFIGS.okx,
+    ...config
+  });
+}
+
 export function createArbitrageEngine(framework: MultiExchangeFramework, config?: any) {
   return new ArbitrageEngine(framework, config);
 }
@@ -220,6 +494,9 @@ export function createExchangeRouter(framework: MultiExchangeFramework, config?:
 export async function setupBasicMultiExchange(exchangeConfigs: {
   binance?: any;
   coinbase?: any;
+  kraken?: any;
+  bybit?: any;
+  okx?: any;
 }) {
   const framework = createMultiExchangeFramework();
   await framework.initialize();
@@ -237,6 +514,30 @@ export async function setupBasicMultiExchange(exchangeConfigs: {
     await framework.registerExchange('coinbase', coinbaseConnector, {
       ...DEFAULT_EXCHANGE_CONFIGS.coinbase,
       ...exchangeConfigs.coinbase
+    });
+  }
+  
+  if (exchangeConfigs.kraken) {
+    const krakenConnector = createKrakenConnector(exchangeConfigs.kraken);
+    await framework.registerExchange('kraken', krakenConnector, {
+      ...DEFAULT_EXCHANGE_CONFIGS.kraken,
+      ...exchangeConfigs.kraken
+    });
+  }
+  
+  if (exchangeConfigs.bybit) {
+    const bybitConnector = createBybitConnector(exchangeConfigs.bybit);
+    await framework.registerExchange('bybit', bybitConnector, {
+      ...DEFAULT_EXCHANGE_CONFIGS.bybit,
+      ...exchangeConfigs.bybit
+    });
+  }
+  
+  if (exchangeConfigs.okx) {
+    const okxConnector = createOKXConnector(exchangeConfigs.okx);
+    await framework.registerExchange('okx', okxConnector, {
+      ...DEFAULT_EXCHANGE_CONFIGS.okx,
+      ...exchangeConfigs.okx
     });
   }
   
@@ -267,9 +568,20 @@ export default {
   ExchangeRouter,
   BinanceConnector,
   CoinbaseConnector,
+  KrakenConnector,
+  BybitConnector,
+  OKXConnector,
   DEFAULT_EXCHANGE_CONFIGS,
   setupBasicMultiExchange,
   setupArbitrageSystem,
+  createMultiExchangeFramework,
+  createBinanceConnector,
+  createCoinbaseConnector,
+  createKrakenConnector,
+  createBybitConnector,
+  createOKXConnector,
+  createArbitrageEngine,
+  createExchangeRouter,
   VERSION,
   BUILD_DATE
 };

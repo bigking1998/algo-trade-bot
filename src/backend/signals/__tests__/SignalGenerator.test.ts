@@ -234,9 +234,9 @@ describe('SignalGenerator', () => {
       });
       
       expect(signal.confidence).toBeGreaterThan(0);
-      expect(signal.confidence).toBeLessThanOrEqualTo(100);
+      expect(signal.confidence).toBeLessThanOrEqual(100);
       expect(signal.strength).toBeGreaterThan(0);
-      expect(signal.strength).toBeLessThanOrEqualTo(1);
+      expect(signal.strength).toBeLessThanOrEqual(1);
       expect(signal.entryPrice).toBe(42800);
       expect(signal.conditions).toContain('test-condition-1');
     });
@@ -247,7 +247,7 @@ describe('SignalGenerator', () => {
 
       // Confidence should be calculated based on condition confidence and other factors
       expect(signal.confidence).toBeGreaterThan(50); // Above minimum threshold
-      expect(signal.confidence).toBeLessThanOrEqualTo(100);
+      expect(signal.confidence).toBeLessThanOrEqual(100);
     });
 
     it('should handle multiple conditions', async () => {
@@ -405,7 +405,7 @@ describe('SignalGenerator', () => {
       const snapshot = signalGenerator.getPerformanceSnapshot();
 
       expect(snapshot.totalConditions).toBeGreaterThan(0);
-      expect(snapshot.performance.evaluationsPerSecond).toBeGreaterThanOrEqualTo(0);
+      expect(snapshot.performance.evaluationsPerSecond).toBeGreaterThanOrEqual(0);
       expect(snapshot.performance.averageLatency).toBeGreaterThan(0);
       expect(snapshot.performance.successRate).toBeGreaterThan(0);
     });
@@ -545,8 +545,8 @@ describe('SignalGenerator', () => {
       const health = await signalGenerator.getHealthStatus();
       
       // Health score might be affected by load
-      expect(health.score).toBeGreaterThanOrEqualTo(0);
-      expect(health.score).toBeLessThanOrEqualTo(100);
+      expect(health.score).toBeGreaterThanOrEqual(0);
+      expect(health.score).toBeLessThanOrEqual(100);
     });
   });
 
